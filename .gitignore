@@ -1,0 +1,124 @@
+# ==========================================
+# ARCHIVOS DE CONFIGURACIÓN SENSIBLES
+# ==========================================
+conexion.php
+config.php
+database.php
+.env
+.env.local
+*.key
+*.pem
+
+# ==========================================
+# SISTEMA OPERATIVO
+# ==========================================
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# ==========================================
+# IDEs Y EDITORES
+# ==========================================
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# PhpStorm / JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# NetBeans
+nbproject/
+
+# ==========================================
+# PHP
+# ==========================================
+# Composer (si lo usas)
+/vendor/
+composer.lock
+composer.phar
+
+# Logs
+*.log
+error.log
+access.log
+php_errors.log
+
+# Cache
+cache/
+tmp/
+temp/
+
+# ==========================================
+# BASE DE DATOS
+# ==========================================
+# Respaldos y dumps (excepto el esquema inicial)
+*.sql
+!DB_proyectophp1.sql
+*.sqlite
+*.db
+
+# ==========================================
+# SUBIDAS DE USUARIOS
+# ==========================================
+uploads/*
+!uploads/.gitkeep
+imagenes/clientes/*
+imagenes/productos/*
+
+# ==========================================
+# DEPENDENCIAS Y LIBRERÍAS
+# ==========================================
+# Node.js (si usas npm)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Bower
+bower_components/
+
+# ==========================================
+# ARCHIVOS TEMPORALES
+# ==========================================
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.sass-cache/
+
+# ==========================================
+# ARCHIVOS DE RESPALDO
+# ==========================================
+*.bak
+*.backup
+*.old
+
+# ==========================================
+# OTROS
+# ==========================================
+# Archivos grandes
+*.zip
+*.rar
+*.7z
+*.tar.gz
+
+# Certificados SSL
+*.crt
+*.cert
