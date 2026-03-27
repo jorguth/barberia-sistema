@@ -249,6 +249,14 @@ try {
             <div class="stat-number"><?php echo $citas_pendientes; ?></div>
             <div class="stat-label">Citas Pendientes</div>
         </div>
+        <div class="stat-card">
+            <div class="stat-icon">🛒</div>
+            <div class="stat-number"><?php
+                $tv = $conn->query("SELECT COUNT(*) t FROM venta WHERE MONTH(fecha_venta)=MONTH(NOW()) AND YEAR(fecha_venta)=YEAR(NOW())");
+                echo $tv ? $tv->fetch_assoc()['t'] : 0;
+            ?></div>
+            <div class="stat-label">Ventas este mes</div>
+        </div>
     </div>
     <?php endif; ?>
     
@@ -278,7 +286,12 @@ try {
         <a href="productos.php" class="menu-card">
             <div class="menu-icon">🛍️</div>
             <h3>Productos</h3>
-            <p>Inventario y ventas de productos</p>
+            <p>Inventario y stock de productos</p>
+        </a>
+        <a href="ventas.php" class="menu-card">
+            <div class="menu-icon">🛒</div>
+            <h3>Ventas</h3>
+            <p>Registrar y consultar ventas directas</p>
         </a>
         <?php endif; ?>
         

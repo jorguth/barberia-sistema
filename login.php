@@ -167,15 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['login'])) {
             transform: translateY(0);
         }
         
-        .error-message {
-            background: #fee;
-            color: #c33;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border-left: 4px solid #c33;
-            font-size: 14px;
-        }
+        /* Alertas manejadas por inc/ui.php */
         
         .register-link {
             text-align: center;
@@ -210,11 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['login'])) {
         <p>Sistema de Gestión</p>
     </div>
     
-    <?php if (!empty($error)): ?>
-    <div class="error-message">
-        ⚠️ <?php echo htmlspecialchars($error); ?>
-    </div>
-    <?php endif; ?>
+
     
     <form method="POST" action="">
         <div class="form-group">
@@ -252,5 +240,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['login'])) {
     </div>
 </div>
 
+<?php include 'inc/ui.php'; ?>
 </body>
 </html>

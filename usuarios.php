@@ -9,6 +9,9 @@ if (!esAdmin()) {
 }
 
 // LÓGICA DE REGISTRO DE USUARIOS
+$mensaje = "";
+$tipo_mensaje = "";
+
 if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['registrar'])) {
     try {
         $nombre = trim($_POST['nombre_usuario']);
@@ -19,11 +22,13 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] == 'POST' &&
         $stmt->bind_param("ssi", $nombre, $pass, $rol);
         
         if ($stmt->execute()) {
-            echo "<script>alert('¡Usuario guardado con éxito!'); window.location='usuarios.php';</script>";
+            $mensaje = "Usuario guardado con éxito";
+            $tipo_mensaje = "success";
         }
         $stmt->close();
     } catch (mysqli_sql_exception $e) {
-        echo "<div style='color:red; background:#ffe; padding:10px; margin: 20px;'>Error al registrar: " . $e->getMessage() . "</div>";
+        $mensaje = "Error al registrar: " . $e->getMessage();
+        $tipo_mensaje = "error";
     }
 }
 
@@ -32,20 +37,20 @@ if (isset($_GET['eliminar'])) {
     try {
         $id = intval($_GET['eliminar']);
         
-        // No permitir eliminar al usuario actual
         if ($id == $_SESSION['id_usuario']) {
-            echo "<script>alert('No puedes eliminar tu propio usuario'); window.location='usuarios.php';</script>";
-            exit();
+            $mensaje = "No puedes eliminar tu propio usuario";
+            $tipo_mensaje = "warning";
+        } else {
+            $stmt = $conn->prepare("DELETE FROM usuario WHERE id_usuario = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $stmt->close();
+            $mensaje = "Usuario eliminado correctamente";
+            $tipo_mensaje = "success";
         }
-        
-        $stmt = $conn->prepare("DELETE FROM usuario WHERE id_usuario = ?");
-        $stmt->bind_param("i", $id);
-        $stmt->execute();
-        $stmt->close();
-        header("Location: usuarios.php");
-        exit();
     } catch (mysqli_sql_exception $e) {
-        echo "<div style='color:red; margin: 20px;'>Error al eliminar: " . $e->getMessage() . "</div>";
+        $mensaje = "Error al eliminar: " . $e->getMessage();
+        $tipo_mensaje = "error";
     }
 }
 
@@ -386,7 +391,7 @@ try {
                         <?php if($row['id_usuario'] != $_SESSION['id_usuario']): ?>
                         <a href="?eliminar=<?php echo $row['id_usuario']; ?>" 
                            class="btn-delete" 
-                           onclick="return confirm('¿Estás seguro de eliminar este usuario?')">
+                           onclick="event.preventDefault(); confirmacion('¿Estás seguro de eliminar este usuario?', '🗑️ Eliminar', () => window.location=this.href)">
                            🗑️ Eliminar
                         </a>
                         <?php else: ?>
@@ -405,5 +410,6 @@ try {
     </div>
 </div>
 
+<?php include 'inc/ui.php'; ?>
 </body>
 </html>

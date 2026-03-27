@@ -172,29 +172,7 @@ if ($_SESSION['id_rol'] == 3) {
             padding: 0 20px;
         }
         
-        .alert {
-            padding: 15px 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            animation: slideDown 0.3s ease;
-        }
-        
-        .alert.success {
-            background: #d4edda;
-            color: #155724;
-            border-left: 4px solid #28a745;
-        }
-        
-        .alert.error {
-            background: #f8d7da;
-            color: #721c24;
-            border-left: 4px solid #dc3545;
-        }
-        
-        @keyframes slideDown {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+        /* Alertas manejadas por inc/ui.php */
         
         .profile-header {
             background: white;
@@ -325,11 +303,7 @@ if ($_SESSION['id_rol'] == 3) {
 </div>
 
 <div class="container">
-    <?php if (!empty($mensaje)): ?>
-    <div class="alert <?php echo $tipo_mensaje; ?>">
-        <?php echo htmlspecialchars($mensaje); ?>
-    </div>
-    <?php endif; ?>
+
     
     <!-- Cabecera del Perfil -->
     <div class="profile-header">
@@ -443,5 +417,6 @@ if ($_SESSION['id_rol'] == 3) {
     <?php endif; ?>
 </div>
 
+<?php include 'inc/ui.php'; ?>
 </body>
 </html>
