@@ -133,6 +133,13 @@ $ult_citas = $conn->query("
             min-height: 100vh;
         }
 
+        .main-content {
+            flex: 1;
+            min-width: 0;
+            overflow-y: auto;
+            background: #f0f2f5;
+        }
+
         /* ---- HEADER ---- */
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -328,12 +335,20 @@ $ult_citas = $conn->query("
 </head>
 <body>
 
-<div class="header">
-    <div class="header-content">
-        <h1>📊 Reportes y Estadísticas</h1>
-        <a href="dashboard.php" class="btn-back">← Dashboard</a>
-    </div>
-</div>
+<div class="dashboard-layout">
+    <?php require_once("inc/sidebar.php"); ?>
+
+    <div class="main-content">
+        <div class="header">
+            <div class="header-content">
+                <h1>📊 Reportes y Estadísticas</h1>
+                <div class="user-info">
+                    <div class="user-badge">
+                        👤 <?php echo htmlspecialchars(getNombreUsuario()); ?> 
+                    </div>
+                </div>
+            </div>
+        </div>
 
 <div class="container">
 
@@ -586,6 +601,10 @@ new Chart(document.getElementById('chartPago'), {
 });
 <?php endif; ?>
 </script>
+
+</div> <!-- .container -->
+</div> <!-- .main-content -->
+</div> <!-- .dashboard-layout -->
 
 <?php include 'inc/ui.php'; ?>
 </body>

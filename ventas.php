@@ -160,6 +160,13 @@ $total_periodo = $conn->query("
             min-height: 100vh;
         }
 
+        .main-content {
+            flex: 1;
+            min-width: 0;
+            overflow-y: auto;
+            background: #f0f2f5;
+        }
+
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -479,12 +486,20 @@ $total_periodo = $conn->query("
 </head>
 <body>
 
-<div class="header">
-    <div class="header-content">
-        <h1>🛒 Ventas</h1>
-        <a href="dashboard.php" class="btn-back">← Dashboard</a>
-    </div>
-</div>
+<div class="dashboard-layout">
+    <?php require_once("inc/sidebar.php"); ?>
+
+    <div class="main-content">
+        <div class="header">
+            <div class="header-content">
+                <h1>🛒 Ventas</h1>
+                <div class="user-info">
+                    <div class="user-badge">
+                        👤 <?php echo htmlspecialchars(getNombreUsuario()); ?> 
+                    </div>
+                </div>
+            </div>
+        </div>
 
 <div class="container">
 
@@ -836,6 +851,10 @@ function cerrarModal() {
 }
 document.getElementById('modalDetalle').addEventListener('click', e => { if (e.target === document.getElementById('modalDetalle')) cerrarModal(); });
 </script>
+
+</div> <!-- .container -->
+</div> <!-- .main-content -->
+</div> <!-- .dashboard-layout -->
 
 <?php include 'inc/ui.php'; ?>
 </body>

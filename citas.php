@@ -235,6 +235,13 @@ for ($h = 8; $h <= 20; $h++) {
             min-height: 100vh;
         }
 
+        .main-content {
+            flex: 1;
+            min-width: 0;
+            overflow-y: auto;
+            background: #f0f2f5;
+        }
+
         /* ============ HEADER ============ */
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -769,12 +776,21 @@ for ($h = 8; $h <= 20; $h++) {
 </head>
 <body>
 
-<div class="header">
-    <div class="header-content">
-        <h1>📅 Gestión de Citas</h1>
-        <a href="dashboard.php" class="btn-back">← Dashboard</a>
-    </div>
-</div>
+<div class="dashboard-layout">
+    <?php require_once("inc/sidebar.php"); ?>
+
+    <div class="main-content">
+        <div class="header">
+            <div class="header-content">
+                <h1>📅 Gestión de Citas</h1>
+                <div class="user-info">
+                    <div class="user-badge">
+                        👤 <?php echo htmlspecialchars(getNombreUsuario()); ?> 
+                    </div>
+                    <a href="logout.php" class="btn-logout" style="background: rgba(255,255,255,0.18); color: white; padding: 6px 12px; border-radius: 6px; text-decoration: none; font-size: 12px; margin-left:10px;">Cerrar Sesión</a>
+                </div>
+            </div>
+        </div>
 
 <div class="container">
 
@@ -1185,5 +1201,8 @@ setTimeout(() => {
 </script>
 
 <?php include 'inc/ui.php'; ?>
+    </div> <!-- .main-content -->
+</div> <!-- .dashboard-layout -->
+
 </body>
 </html>

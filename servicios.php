@@ -92,9 +92,17 @@ try {
         }
         
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f5f6fa;
+            font-family: 'Inter', 'Segoe UI', sans-serif;
+            background: #f0f2f8;
             color: #333;
+            min-height: 100vh;
+        }
+
+        .main-content {
+            flex: 1;
+            min-width: 0;
+            overflow-y: auto;
+            background: #f0f2f5;
         }
         
         .header {
@@ -312,12 +320,20 @@ try {
 </head>
 <body>
 
-<div class="header">
-    <div class="header-content">
-        <h1>✂️ Gestión de Servicios</h1>
-        <a href="dashboard.php" class="btn-back">← Volver al Dashboard</a>
-    </div>
-</div>
+<div class="dashboard-layout">
+    <?php require_once("inc/sidebar.php"); ?>
+
+    <div class="main-content">
+        <div class="header">
+            <div class="header-content">
+                <h1>✂️ Gestión de Servicios</h1>
+                <div class="user-info">
+                    <div class="user-badge">
+                        👤 <?php echo htmlspecialchars(getNombreUsuario()); ?> 
+                    </div>
+                </div>
+            </div>
+        </div>
 
 <div class="container">
 
@@ -431,6 +447,10 @@ try {
         <?php endif; ?>
     </div>
 </div>
+
+</div> <!-- .container -->
+</div> <!-- .main-content -->
+</div> <!-- .dashboard-layout -->
 
 <?php include 'inc/ui.php'; ?>
 </body>
