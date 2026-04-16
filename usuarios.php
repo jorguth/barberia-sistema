@@ -101,12 +101,14 @@ try {
             background: #f0f2f5;
         }
         
-        /* Header */
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px 0;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            background: #ffffff;
+            color: #1c1e21;
+            padding: 16px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.08);
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
         
         .header-content {
@@ -119,22 +121,43 @@ try {
         }
         
         .header h1 {
-            font-size: 24px;
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
         
-        .btn-back {
-            background: rgba(255,255,255,0.2);
-            color: white;
-            padding: 8px 20px;
-            border: 1px solid rgba(255,255,255,0.3);
-            border-radius: 5px;
+        .user-badge {
+            background: #f0f2f5;
+            color: #333;
+            padding: 6px 14px;
+            border-radius: 16px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        
+        .btn-logout {
+            background: #fff;
+            color: #ef4444;
+            padding: 6px 16px;
+            border: 1px solid #ef4444;
+            border-radius: 16px;
             text-decoration: none;
-            font-size: 14px;
-            transition: all 0.3s;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
         }
         
-        .btn-back:hover {
-            background: rgba(255,255,255,0.3);
+        .btn-logout:hover {
+            background: #ef4444;
+            color: white;
         }
         
         /* Container */
@@ -322,7 +345,9 @@ try {
                 <div class="user-info">
                     <div class="user-badge">
                         👤 <?php echo htmlspecialchars(getNombreUsuario()); ?> 
+                        (<?php echo htmlspecialchars(getRolUsuario()); ?>)
                     </div>
+                    <a href="logout.php" class="btn-logout">Cerrar Sesión</a>
                 </div>
             </div>
         </div>

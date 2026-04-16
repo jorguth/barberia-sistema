@@ -66,16 +66,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['nueva_venta'])) {
 
         foreach ($items as $item) {
             // Insertar detalle
+            // El trigger 'actualizar_stock_venta_insert' descontará el stock automáticamente
             $sd = $conn->prepare("INSERT INTO venta_detalle (id_venta, id_producto, cantidad, precio_unitario, subtotal) VALUES (?,?,?,?,?)");
             $sd->bind_param("iiidd", $id_venta, $item['id'], $item['cantidad'], $item['precio'], $item['sub']);
             $sd->execute();
             $sd->close();
-
-            // Descontar stock
-            $sq = $conn->prepare("UPDATE producto SET stock = stock - ? WHERE id_producto = ?");
-            $sq->bind_param("ii", $item['cantidad'], $item['id']);
-            $sq->execute();
-            $sq->close();
         }
 
         $conn->commit();
@@ -96,11 +91,8 @@ if (isset($_GET['eliminar']) && esAdmin()) {
     try {
         $id = intval($_GET['eliminar']);
 
-        // Restaurar stock
-        $detalles = $conn->query("SELECT id_producto, cantidad FROM venta_detalle WHERE id_venta = $id");
-        while ($det = $detalles->fetch_assoc()) {
-            $conn->query("UPDATE producto SET stock = stock + {$det['cantidad']} WHERE id_producto = {$det['id_producto']}");
-        }
+        // La restauración del stock se maneja automáticamente en la DB 
+        // mediante el trigger 'actualizar_stock_venta_delete' al eliminar la venta en cascada.
 
         $st = $conn->prepare("DELETE FROM venta WHERE id_venta = ?");
         $st->bind_param("i", $id);
@@ -128,14 +120,10 @@ $filtro_desde = $_GET['desde'] ?? date('Y-m-01');
 $filtro_hasta = $_GET['hasta'] ?? date('Y-m-d');
 
 $ventas = $conn->query("
-    SELECT v.*,
-           c.nombre   AS nombre_cliente,
-           u.nombre_usuario AS nombre_usuario
-    FROM venta v
-    LEFT JOIN cliente c ON v.id_cliente = c.id_cliente
-    LEFT JOIN usuario u ON v.id_usuario = u.id_usuario
-    WHERE DATE(v.fecha_venta) BETWEEN '$filtro_desde' AND '$filtro_hasta'
-    ORDER BY v.fecha_venta DESC
+    SELECT *
+    FROM v_historial_ventas
+    WHERE DATE(fecha_venta) BETWEEN '$filtro_desde' AND '$filtro_hasta'
+    ORDER BY fecha_venta DESC
 ");
 
 $total_periodo = $conn->query("
@@ -168,10 +156,13 @@ $total_periodo = $conn->query("
         }
 
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 18px 0;
-            box-shadow: 0 4px 20px rgba(102,126,234,0.35);
+            background: #ffffff;
+            color: #1c1e21;
+            padding: 16px 0;
+            border-bottom: 1px solid rgba(0,0,0,0.08);
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
         .header-content {
             max-width: 1300px;
@@ -181,18 +172,41 @@ $total_periodo = $conn->query("
             justify-content: space-between;
             align-items: center;
         }
-        .header h1 { font-size: 22px; font-weight: 700; }
-        .btn-back {
-            background: rgba(255,255,255,0.18);
-            color: white;
-            padding: 8px 18px;
-            border: 1px solid rgba(255,255,255,0.3);
-            border-radius: 8px;
+        .header h1 {
+            font-size: 20px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .user-badge {
+            background: #f0f2f5;
+            color: #333;
+            padding: 6px 14px;
+            border-radius: 16px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .btn-logout {
+            background: #fff;
+            color: #ef4444;
+            padding: 6px 16px;
+            border: 1px solid #ef4444;
+            border-radius: 16px;
             text-decoration: none;
             font-size: 13px;
+            font-weight: 500;
             transition: all 0.2s;
         }
-        .btn-back:hover { background: rgba(255,255,255,0.28); }
+        .btn-logout:hover {
+            background: #ef4444;
+            color: white;
+        }
 
         .container {
             max-width: 1300px;
@@ -496,7 +510,9 @@ $total_periodo = $conn->query("
                 <div class="user-info">
                     <div class="user-badge">
                         👤 <?php echo htmlspecialchars(getNombreUsuario()); ?> 
+                        (<?php echo htmlspecialchars(getRolUsuario()); ?>)
                     </div>
+                    <a href="logout.php" class="btn-logout">Cerrar Sesión</a>
                 </div>
             </div>
         </div>
@@ -707,10 +723,7 @@ $total_periodo = $conn->query("
 // Cargar datos de ventas para JS (detalle)
 $ventas_js = [];
 try {
-    $rv = $conn->query("SELECT v.*, c.nombre AS nombre_cliente, u.nombre_usuario FROM venta v
-                        LEFT JOIN cliente c ON v.id_cliente = c.id_cliente
-                        LEFT JOIN usuario u ON v.id_usuario = u.id_usuario
-                        ORDER BY v.fecha_venta DESC LIMIT 200");
+    $rv = $conn->query("SELECT * FROM v_historial_ventas ORDER BY fecha_venta DESC LIMIT 200");
     while ($row = $rv->fetch_assoc()) {
         $id = $row['id_venta'];
         $detalles = [];

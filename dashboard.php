@@ -280,6 +280,33 @@ try {
         <h2>¡Bienvenido/a, <?php echo htmlspecialchars(getNombreUsuario()); ?>!</h2>
         <p>Selecciona una opción del menú para comenzar tu día de manera eficiente.</p>
     </div>
+
+    <?php
+    // Alerta de Stock Bajo
+    $stock_bajo = [];
+    if (esAdmin() || esBarbero()) {
+        try {
+            // Utilizamos la nueva vista de stock_bajo
+            $rsb = $conn->query("SELECT nombre, stock FROM v_stock_bajo LIMIT 5");
+            if ($rsb) {
+                while($s = $rsb->fetch_assoc()) {
+                    $stock_bajo[] = $s;
+                }
+            }
+        } catch(Exception $e){}
+    }
+    ?>
+    <?php if(!empty($stock_bajo)): ?>
+    <div class="bento-card card-welcome" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);">
+        <h2>⚠️ Alerta de Inventario</h2>
+        <p>Los siguientes productos tienen muy poco stock y necesitan reposición:</p>
+        <ul style="margin-top:10px; margin-left: 20px; font-weight:600; color: #fff;">
+            <?php foreach($stock_bajo as $psb): ?>
+                <li><?php echo htmlspecialchars($psb['nombre']); ?> (Quedan: <?php echo $psb['stock']; ?>)</li>
+            <?php endforeach; ?>
+        </ul>
+    </div>
+    <?php endif; ?>
     
     <!-- Estadísticas (solo para admin y barbero) -->
     <?php if (esAdmin() || esBarbero()): ?>
