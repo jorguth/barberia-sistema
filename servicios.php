@@ -2,6 +2,7 @@
 // Incluir autenticación
 require_once("auth.php");
 require_once("conexion.php");
+require_once("inc/pagination_helper.php");
 
 // Verificar que sea administrador o barbero
 if (!esAdmin() && !esBarbero()) {
@@ -45,17 +46,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar'])) {
 
 // ELIMINAR SERVICIO
 if (isset($_GET['eliminar'])) {
-    try {
-        $id = intval($_GET['eliminar']);
-        $stmt = $conn->prepare("DELETE FROM servicio WHERE id_servicio = ?");
-        $stmt->bind_param("i", $id);
-        $stmt->execute();
-        $stmt->close();
-        $mensaje = "Servicio eliminado correctamente";
-        $tipo_mensaje = "success";
-    } catch (mysqli_sql_exception $e) {
-        $mensaje = "Error al eliminar: " . $e->getMessage();
-        $tipo_mensaje = "error";
+    if (esAdmin()) {
+        try {
+            $id = intval($_GET['eliminar']);
+            $stmt = $conn->prepare("DELETE FROM servicio WHERE id_servicio = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $stmt->close();
+            $mensaje = "Servicio eliminado correctamente";
+            $tipo_mensaje = "success";
+        } catch (mysqli_sql_exception $e) {
+            $mensaje = "Error al eliminar servicio: " . $e->getMessage();
+            $tipo_mensaje = "error";
+        }
+    } else {
+        $mensaje = "No tienes permisos para eliminar servicios. Solo los administradores pueden realizar esta acción.";
+        $tipo_mensaje = "warning";
     }
 }
 
@@ -70,9 +76,13 @@ if (isset($_GET['editar'])) {
     $stmt->close();
 }
 
-// CONSULTAR SERVICIOS
+// CONSULTAR SERVICIOS CON PAGINACIÓN
 try {
-    $servicios = $conn->query("SELECT * FROM servicio ORDER BY nombre");
+    $pagData = getPaginationData($conn, "SELECT COUNT(*) as total FROM servicio", 12);
+    $limit = 12;
+    $offset = $pagData['offset'];
+    
+    $servicios = $conn->query("SELECT * FROM servicio ORDER BY nombre LIMIT $limit OFFSET $offset");
 } catch (mysqli_sql_exception $e) {
     $servicios = false;
 }
@@ -340,6 +350,7 @@ try {
             color: #999;
             margin-top: 4px;
         }
+        <?php echo getPaginationStyles(); ?>
     </style>
 </head>
 <body>
@@ -434,7 +445,6 @@ try {
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
                     <th>Servicio</th>
                     <th>Duración</th>
                     <th>Precio</th>
@@ -444,7 +454,6 @@ try {
             <tbody>
                 <?php while($row = $servicios->fetch_assoc()): ?>
                 <tr>
-                    <td><strong>#<?php echo $row['id_servicio']; ?></strong></td>
                     <td><?php echo htmlspecialchars($row['nombre']); ?></td>
                     <td>
                         <span class="duration">⏱️ <?php echo $row['duracion_minutos']; ?> min</span>
@@ -457,7 +466,7 @@ try {
                             <a href="?editar=<?php echo $row['id_servicio']; ?>">✏️ Editar</a>
                             <a href="?eliminar=<?php echo $row['id_servicio']; ?>" 
                                class="delete"
-                               onclick="event.preventDefault(); confirmacion('¿Estás seguro de eliminar este servicio?', '🗑️ Eliminar', () => window.location=this.href)">
+                               onclick="event.preventDefault(); confirmacion('¿Estás seguro de eliminar este servicio?', '🗑️ Eliminar', () => window.location.href='?eliminar=<?php echo $row['id_servicio']; ?>')">
                                🗑️ Eliminar
                             </a>
                         </div>
@@ -466,6 +475,9 @@ try {
                 <?php endwhile; ?>
             </tbody>
         </table>
+        
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages']); ?>
+        
         <?php else: ?>
         <div class="empty-state">
             <p>No hay servicios registrados</p>

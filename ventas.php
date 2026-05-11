@@ -1,6 +1,7 @@
 <?php
 require_once("auth.php");
 require_once("conexion.php");
+require_once("inc/pagination_helper.php");
 
 if (!esAdmin() && !esBarbero()) {
     die("<h1>Acceso Denegado</h1><p>No tienes permisos.</p><a href='dashboard.php'>Volver</a>");
@@ -87,23 +88,28 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['nueva_venta'])) {
 /* ============================================================
    ELIMINAR VENTA (solo admin)
    ============================================================ */
-if (isset($_GET['eliminar']) && esAdmin()) {
-    try {
-        $id = intval($_GET['eliminar']);
+if (isset($_GET['eliminar'])) {
+    if (esAdmin()) {
+        try {
+            $id = intval($_GET['eliminar']);
 
-        // La restauración del stock se maneja automáticamente en la DB 
-        // mediante el trigger 'actualizar_stock_venta_delete' al eliminar la venta en cascada.
+            // La restauración del stock se maneja automáticamente en la DB 
+            // mediante el trigger 'actualizar_stock_venta_delete' al eliminar la venta en cascada.
 
-        $st = $conn->prepare("DELETE FROM venta WHERE id_venta = ?");
-        $st->bind_param("i", $id);
-        $st->execute();
-        $st->close();
+            $st = $conn->prepare("DELETE FROM venta WHERE id_venta = ?");
+            $st->bind_param("i", $id);
+            $st->execute();
+            $st->close();
 
-        $mensaje      = "Venta eliminada y stock restaurado.";
-        $tipo_mensaje = "success";
-    } catch (Exception $e) {
-        $mensaje      = "Error al eliminar: " . $e->getMessage();
-        $tipo_mensaje = "error";
+            $mensaje      = "Venta eliminada y stock restaurado correctamente.";
+            $tipo_mensaje = "success";
+        } catch (Exception $e) {
+            $mensaje      = "Error al eliminar venta: " . $e->getMessage();
+            $tipo_mensaje = "error";
+        }
+    } else {
+        $mensaje = "No tienes permisos para eliminar ventas. Solo los administradores pueden realizar esta acción.";
+        $tipo_mensaje = "warning";
     }
 }
 
@@ -111,24 +117,33 @@ if (isset($_GET['eliminar']) && esAdmin()) {
    DATOS PARA EL FORMULARIO
    ============================================================ */
 $clientes  = $conn->query("SELECT id_cliente, nombre FROM cliente ORDER BY nombre");
-$productos_disp = $conn->query("SELECT id_producto, nombre, precio, stock FROM producto WHERE stock > 0 ORDER BY nombre");
 
-/* ============================================================
-   HISTORIAL – con filtro de fecha
-   ============================================================ */
-$filtro_desde = $_GET['desde'] ?? date('Y-m-01');
-$filtro_hasta = $_GET['hasta'] ?? date('Y-m-d');
+// PRODUCTOS DISPONIBLES con PAGINACIÓN
+$pagDataProd = getPaginationData($conn, "SELECT COUNT(*) as total FROM producto WHERE stock > 0", 12, 'p_prod');
+$limitProd = 12;
+$offsetProd = $pagDataProd['offset'];
+$productos_disp = $conn->query("SELECT id_producto, nombre, precio, stock FROM producto WHERE stock > 0 ORDER BY nombre LIMIT $limitProd OFFSET $offsetProd");
+
+// HISTORIAL – con filtro de fecha y PAGINACIÓN
+$filtro_desde = !empty($_GET['desde']) ? $_GET['desde'] : date('Y-m-01');
+$filtro_hasta = !empty($_GET['hasta']) ? $_GET['hasta'] : date('Y-m-d');
+
+$countQuery = "SELECT COUNT(*) as total FROM venta WHERE fecha_venta >= '$filtro_desde 00:00:00' AND fecha_venta <= '$filtro_hasta 23:59:59'";
+$pagData = getPaginationData($conn, $countQuery, 12);
+$limit = 12;
+$offset = $pagData['offset'];
 
 $ventas = $conn->query("
     SELECT *
     FROM v_historial_ventas
-    WHERE DATE(fecha_venta) BETWEEN '$filtro_desde' AND '$filtro_hasta'
+    WHERE fecha_venta >= '$filtro_desde 00:00:00' AND fecha_venta <= '$filtro_hasta 23:59:59'
     ORDER BY fecha_venta DESC
+    LIMIT $limit OFFSET $offset
 ");
 
 $total_periodo = $conn->query("
     SELECT SUM(total) as total FROM venta
-    WHERE DATE(fecha_venta) BETWEEN '$filtro_desde' AND '$filtro_hasta'
+    WHERE fecha_venta >= '$filtro_desde 00:00:00' AND fecha_venta <= '$filtro_hasta 23:59:59'
 ")->fetch_assoc()['total'] ?? 0;
 ?>
 <!DOCTYPE html>
@@ -496,6 +511,7 @@ $total_periodo = $conn->query("
         .det-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
         .det-table th { background: #f3f4f6; padding: 8px 12px; text-align: left; font-weight: 600; color: #666; }
         .det-table td { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; }
+        <?php echo getPaginationStyles(); ?>
     </style>
 </head>
 <body>
@@ -602,7 +618,7 @@ $total_periodo = $conn->query("
 
         <!-- ===== RESUMEN y mini-info ===== -->
         <div style="display:flex;flex-direction:column;gap:16px;">
-            <div class="card">
+            <div class="card" id="card-productos">
                 <div class="card-header">📋 Productos Disponibles</div>
                 <div class="card-body" style="padding:0;">
                     <table class="hist">
@@ -630,6 +646,18 @@ $total_periodo = $conn->query("
                             <?php endwhile; ?>
                         </tbody>
                     </table>
+                    
+                    <div style="padding: 10px;">
+                        <?php echo renderPagination($pagDataProd['current_page'], $pagDataProd['total_pages'], "?desde=$filtro_desde&hasta=$filtro_hasta&p=" . ($pagData['current_page'] ?? 1), 'p_prod'); ?>
+                        <script>
+                            // Reforzar enlaces de productos con el ancla del card
+                            document.querySelectorAll('#card-productos .page-link').forEach(link => {
+                                if (link.href && !link.href.includes('#')) {
+                                    link.href += '#card-productos';
+                                }
+                            });
+                        </script>
+                    </div>
                 </div>
             </div>
         </div>
@@ -637,7 +665,7 @@ $total_periodo = $conn->query("
     </div><!-- /grid-2 -->
 
     <!-- ===== HISTORIAL DE VENTAS ===== -->
-    <div class="card historial-section">
+    <div class="card historial-section" id="historial-ventas">
         <div class="card-header">📊 Historial de Ventas</div>
 
         <!-- Filtro -->
@@ -662,7 +690,6 @@ $total_periodo = $conn->query("
         <table class="hist">
             <thead>
                 <tr>
-                    <th>#</th>
                     <th>Fecha</th>
                     <th>Cliente</th>
                     <th>Vendedor</th>
@@ -674,7 +701,6 @@ $total_periodo = $conn->query("
             <tbody>
                 <?php while ($v = $ventas->fetch_assoc()): ?>
                 <tr>
-                    <td><strong>#<?= $v['id_venta'] ?></strong></td>
                     <td><?= date('d/m/Y H:i', strtotime($v['fecha_venta'])) ?></td>
                     <td><?= htmlspecialchars($v['nombre_cliente'] ?? 'Sin cliente') ?></td>
                     <td><?= htmlspecialchars($v['nombre_usuario'] ?? '—') ?></td>
@@ -686,7 +712,7 @@ $total_periodo = $conn->query("
                             <?php if (esAdmin()): ?>
                             <a class="btn-del"
                                href="?eliminar=<?= $v['id_venta'] ?>&desde=<?= $filtro_desde ?>&hasta=<?= $filtro_hasta ?>"
-                               onclick="event.preventDefault(); confirmacion('¿Eliminar venta #<?= $v['id_venta'] ?>? El stock será restaurado.', '🗑️ Eliminar', () => window.location=this.href)">
+                               onclick="event.preventDefault(); confirmacion('¿Eliminar venta #<?= $v['id_venta'] ?>? El stock será restaurado.', '🗑️ Eliminar', () => window.location.href='?eliminar=<?= $v['id_venta'] ?>')">
                                🗑️
                             </a>
                             <?php endif; ?>
@@ -696,6 +722,17 @@ $total_periodo = $conn->query("
                 <?php endwhile; ?>
             </tbody>
         </table>
+        
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], "?desde=$filtro_desde&hasta=$filtro_hasta&p_prod=" . ($pagDataProd['current_page'] ?? 1)); ?>
+        <script>
+            // Reforzar enlaces de historial con el ancla de su sección
+            document.querySelectorAll('#historial-ventas .page-link').forEach(link => {
+                if (link.href && !link.href.includes('#')) {
+                    link.href += '#historial-ventas';
+                }
+            });
+        </script>
+        
         <?php else: ?>
         <div class="empty-state">
             <div class="ei">🛒</div>

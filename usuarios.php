@@ -2,6 +2,7 @@
 // Incluir autenticación
 require_once("auth.php");
 require_once("conexion.php");
+require_once("inc/pagination_helper.php");
 
 // Verificar que sea administrador
 if (!esAdmin()) {
@@ -34,33 +35,43 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] == 'POST' &&
 
 // LÓGICA PARA ELIMINAR USUARIO
 if (isset($_GET['eliminar'])) {
-    try {
-        $id = intval($_GET['eliminar']);
-        
-        if ($id == $_SESSION['id_usuario']) {
-            $mensaje = "No puedes eliminar tu propio usuario";
-            $tipo_mensaje = "warning";
-        } else {
-            $stmt = $conn->prepare("DELETE FROM usuario WHERE id_usuario = ?");
-            $stmt->bind_param("i", $id);
-            $stmt->execute();
-            $stmt->close();
-            $mensaje = "Usuario eliminado correctamente";
-            $tipo_mensaje = "success";
+    if (esAdmin()) {
+        try {
+            $id = intval($_GET['eliminar']);
+            
+            if ($id == $_SESSION['id_usuario']) {
+                $mensaje = "No puedes eliminar tu propio usuario";
+                $tipo_mensaje = "warning";
+            } else {
+                $stmt = $conn->prepare("DELETE FROM usuario WHERE id_usuario = ?");
+                $stmt->bind_param("i", $id);
+                $stmt->execute();
+                $stmt->close();
+                $mensaje = "Usuario eliminado correctamente";
+                $tipo_mensaje = "success";
+            }
+        } catch (mysqli_sql_exception $e) {
+            $mensaje = "Error al eliminar usuario: " . $e->getMessage();
+            $tipo_mensaje = "error";
         }
-    } catch (mysqli_sql_exception $e) {
-        $mensaje = "Error al eliminar: " . $e->getMessage();
-        $tipo_mensaje = "error";
+    } else {
+        $mensaje = "No tienes permisos para eliminar usuarios. Solo los administradores pueden realizar esta acción.";
+        $tipo_mensaje = "warning";
     }
 }
 
-// CONSULTA DE USUARIOS PARA LA TABLA
+// CONSULTA DE USUARIOS PARA LA TABLA CON PAGINACIÓN
 try {
+    $pagData = getPaginationData($conn, "SELECT COUNT(*) as total FROM usuario", 12);
+    $limit = 12;
+    $offset = $pagData['offset'];
+    
     $usuarios = $conn->query("
         SELECT u.*, r.nombre_rol 
         FROM usuario u
         LEFT JOIN rol r ON u.id_rol = r.id_rol
         ORDER BY u.id_usuario DESC
+        LIMIT $limit OFFSET $offset
     ");
 } catch (mysqli_sql_exception $e) {
     $usuarios = false;
@@ -331,6 +342,7 @@ try {
             padding: 40px;
             color: #999;
         }
+        <?php echo getPaginationStyles(); ?>
     </style>
 </head>
 <body>
@@ -412,7 +424,6 @@ try {
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
                     <th>Usuario</th>
                     <th>Rol</th>
                     <th>Acciones</th>
@@ -421,7 +432,6 @@ try {
             <tbody>
                 <?php while($row = $usuarios->fetch_assoc()): ?>
                 <tr>
-                    <td><strong>#<?php echo $row['id_usuario']; ?></strong></td>
                     <td><?php echo htmlspecialchars($row['nombre_usuario']); ?></td>
                     <td>
                         <span class="rol-tag <?php echo strtolower($row['nombre_rol']); ?>">
@@ -432,7 +442,7 @@ try {
                         <?php if($row['id_usuario'] != $_SESSION['id_usuario']): ?>
                         <a href="?eliminar=<?php echo $row['id_usuario']; ?>" 
                            class="btn-delete" 
-                           onclick="event.preventDefault(); confirmacion('¿Estás seguro de eliminar este usuario?', '🗑️ Eliminar', () => window.location=this.href)">
+                           onclick="event.preventDefault(); confirmacion('¿Estás seguro de eliminar este usuario?', '🗑️ Eliminar', () => window.location.href='?eliminar=<?php echo $row['id_usuario']; ?>')">
                            🗑️ Eliminar
                         </a>
                         <?php else: ?>
@@ -443,6 +453,9 @@ try {
                 <?php endwhile; ?>
             </tbody>
         </table>
+        
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages']); ?>
+        
         <?php else: ?>
         <div class="empty-state">
             <p>No hay usuarios registrados en el sistema</p>

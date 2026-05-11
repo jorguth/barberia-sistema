@@ -13,6 +13,10 @@ $periodo  = $_GET['periodo'] ?? 'mes';
 $anio     = intval($_GET['anio'] ?? date('Y'));
 
 switch ($periodo) {
+    case 'todo':
+        $desde = '2020-01-01'; 
+        $hasta = date('Y-m-d');
+        break;
     case 'semana':
         $desde = date('Y-m-d', strtotime('monday this week'));
         $hasta = date('Y-m-d', strtotime('sunday this week'));
@@ -22,8 +26,8 @@ switch ($periodo) {
         $hasta = "$anio-12-31";
         break;
     case 'personalizado':
-        $desde = $_GET['desde'] ?? date('Y-m-01');
-        $hasta = $_GET['hasta'] ?? date('Y-m-d');
+        $desde = !empty($_GET['desde']) ? $_GET['desde'] : date('Y-m-01');
+        $hasta = !empty($_GET['hasta']) ? $_GET['hasta'] : date('Y-m-d');
         break;
     default: // mes
         $desde = date('Y-m-01');
@@ -34,8 +38,8 @@ switch ($periodo) {
 /* ============================================================
    KPIs PRINCIPALES
    ============================================================ */
-$ingr_ventas  = (float)($conn->query("SELECT SUM(total) t FROM venta WHERE DATE(fecha_venta) BETWEEN '$desde' AND '$hasta'")->fetch_assoc()['t'] ?? 0);
-$num_ventas   = (int)($conn->query("SELECT COUNT(*) t FROM venta WHERE DATE(fecha_venta) BETWEEN '$desde' AND '$hasta'")->fetch_assoc()['t'] ?? 0);
+$ingr_ventas  = (float)($conn->query("SELECT SUM(total) t FROM venta WHERE fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
+$num_ventas   = (int)($conn->query("SELECT COUNT(*) t FROM venta WHERE fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
 $num_citas    = (int)($conn->query("SELECT COUNT(*) t FROM cita WHERE estado='Completada' AND fecha BETWEEN '$desde' AND '$hasta'")->fetch_assoc()['t'] ?? 0);
 $ingr_citas   = (float)($conn->query("SELECT SUM(total_general) t FROM cita WHERE estado='Completada' AND fecha BETWEEN '$desde' AND '$hasta'")->fetch_assoc()['t'] ?? 0);
 $total_ingr   = $ingr_ventas + $ingr_citas;
@@ -82,7 +86,7 @@ while ($r = $top_servicios->fetch_assoc()) {
    ============================================================ */
 $pago_res = $conn->query("
     SELECT metodo_pago, COUNT(*) AS cant, SUM(total) AS total
-    FROM venta WHERE DATE(fecha_venta) BETWEEN '$desde' AND '$hasta'
+    FROM venta WHERE fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'
     GROUP BY metodo_pago
 ");
 $pago_labels = [];
@@ -100,7 +104,7 @@ $top_productos = $conn->query("
     FROM venta_detalle vd
     JOIN producto p ON vd.id_producto = p.id_producto
     JOIN venta v ON vd.id_venta = v.id_venta
-    WHERE DATE(v.fecha_venta) BETWEEN '$desde' AND '$hasta'
+    WHERE v.fecha_venta >= '$desde 00:00:00' AND v.fecha_venta <= '$hasta 23:59:59'
     GROUP BY vd.id_producto ORDER BY total_cant DESC LIMIT 10
 ");
 
@@ -386,6 +390,7 @@ $ult_citas = $conn->query("
         <a href="?periodo=semana" class="btn-periodo <?= $periodo=='semana'?'active':'' ?>">Esta semana</a>
         <a href="?periodo=mes"    class="btn-periodo <?= $periodo=='mes'?'active':'' ?>">Este mes</a>
         <a href="?periodo=anio&anio=<?= $anio ?>" class="btn-periodo <?= $periodo=='anio'?'active':'' ?>">Este año</a>
+        <a href="?periodo=todo"   class="btn-periodo <?= $periodo=='todo'?'active':'' ?>">General</a>
         <span style="color:#ccc">|</span>
         <input type="date" name="desde" value="<?= $periodo=='personalizado'?$desde:'' ?>" placeholder="Desde">
         <input type="date" name="hasta" value="<?= $periodo=='personalizado'?$hasta:'' ?>" placeholder="Hasta">
@@ -492,11 +497,10 @@ $ult_citas = $conn->query("
             <div class="table-header">📅 Citas Completadas Recientes</div>
             <?php if ($ult_citas && $ult_citas->num_rows > 0): ?>
             <table class="rep">
-                <thead><tr><th>#</th><th>Cliente</th><th>Fecha</th><th>Total</th><th>Pago</th></tr></thead>
+                <thead><tr><th>Cliente</th><th>Fecha</th><th>Total</th><th>Pago</th></tr></thead>
                 <tbody>
                 <?php while ($r = $ult_citas->fetch_assoc()): ?>
                 <tr>
-                    <td><strong>#<?= $r['id_cita'] ?></strong></td>
                     <td><?= htmlspecialchars($r['cliente'] ?? '—') ?></td>
                     <td><?= date('d/m', strtotime($r['fecha'])) ?> <?= substr($r['hora'],0,5) ?></td>
                     <td style="color:#667eea;font-weight:700;">$<?= number_format($r['total_general'], 2) ?></td>

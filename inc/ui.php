@@ -274,8 +274,9 @@ function cerrarConfirm() {
 }
 
 document.getElementById('confirm-ok').addEventListener('click', function() {
+    const cb = _confirmCallback;
     cerrarConfirm();
-    if (typeof _confirmCallback === 'function') _confirmCallback();
+    if (typeof cb === 'function') cb();
 });
 
 // Cerrar al click fuera
@@ -292,4 +293,42 @@ document.addEventListener('keydown', function(e) {
 // Mostrar toast desde PHP
 showToast(<?php echo json_encode(htmlspecialchars_decode($_toast_msg)); ?>, '<?php echo htmlspecialchars($_toast_type ?: 'info'); ?>');
 <?php endif; ?>
+
+/* ===========================
+   SCROLL PERSISTENCE
+   =========================== */
+if ('scrollRestoration' in history) {
+    history.scrollRestoration = 'manual';
+}
+
+(function() {
+    const key = 'scroll_pos_' + window.location.pathname;
+    
+    // Restaurar posición lo antes posible
+    function restoreScroll() {
+        const scrollPos = sessionStorage.getItem(key);
+        if (scrollPos) {
+            window.scrollTo(0, parseInt(scrollPos));
+            // No borrar inmediatamente para permitir re-intentos si el contenido tarda un poco
+            setTimeout(() => sessionStorage.removeItem(key), 100);
+        }
+    }
+
+    window.addEventListener('load', restoreScroll);
+    
+    // También intentar en DOMContentLoaded por si el contenido ya está ahí
+    document.addEventListener('DOMContentLoaded', restoreScroll);
+
+    // Guardar posición al salir
+    window.addEventListener('beforeunload', () => {
+        sessionStorage.setItem(key, window.scrollY);
+    });
+    
+    // Guardar también al hacer clic en links de paginación para mayor seguridad
+    document.addEventListener('click', (e) => {
+        if (e.target.closest('.page-link')) {
+            sessionStorage.setItem(key, window.scrollY);
+        }
+    });
+})();
 </script>

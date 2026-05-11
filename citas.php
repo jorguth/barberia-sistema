@@ -2,6 +2,7 @@
 // Incluir autenticación
 require_once("auth.php");
 require_once("conexion.php");
+require_once("inc/pagination_helper.php");
 
 // Variables para mensajes
 $mensaje = "";
@@ -27,10 +28,10 @@ $fin_str    = $fin_semana->format('Y-m-d');
 // -------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar_cita'])) {
     try {
+        $id_cita      = isset($_POST['id_cita']) ? intval($_POST['id_cita']) : 0;
         $id_cliente   = intval($_POST['id_cliente']);
         $fecha        = trim($_POST['fecha']);
         $hora         = trim($_POST['hora']);
-        $estado       = 'Pendiente';
         $servicios    = isset($_POST['servicios']) ? $_POST['servicios'] : [];
         $observaciones = trim($_POST['observaciones'] ?? '');
 
@@ -46,28 +47,96 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar_cita'])) {
             }
         }
 
-        $stmt = $conn->prepare("INSERT INTO cita (id_cliente, fecha, hora, estado) VALUES (?, ?, ?, ?)");
-        $stmt->bind_param("isss", $id_cliente, $fecha, $hora, $estado);
-        $stmt->execute();
-        $id_cita_new = $conn->insert_id;
-        $stmt->close();
+        // VALIDACIÓN DE CLIENTE
+        if ($id_cliente <= 0) {
+            throw new Exception("Debes seleccionar un cliente válido.");
+        }
+
+        // VALIDACIÓN DE HORARIO
+        $hora_num = (int)str_replace(':', '', $hora);
+        if ($hora_num < 800 || $hora_num > 2000) {
+            throw new Exception("La hora seleccionada ($hora) está fuera de nuestro horario de atención (08:00 a 20:00).");
+        }
+
+        // VALIDACIÓN DE FECHA PASADA
+        $fecha_hora_reserva = strtotime("$fecha $hora");
+        $ahora = time();
+        
+        if (!esAdmin()) {
+            if ($id_cita == 0) {
+                if ($fecha_hora_reserva < $ahora) {
+                    throw new Exception("No puedes programar una cita en una fecha u hora que ya pasaron.");
+                }
+            } else {
+                // Obtener fecha/hora antigua para comparar
+                $stmt_old = $conn->prepare("SELECT fecha, hora FROM cita WHERE id_cita = ?");
+                $stmt_old->bind_param("i", $id_cita);
+                $stmt_old->execute();
+                $res_old = $stmt_old->get_result()->fetch_assoc();
+                $stmt_old->close();
+                
+                if ($res_old) {
+                    $fecha_hora_antigua = strtotime($res_old['fecha'] . " " . $res_old['hora']);
+                    // Si cambia la fecha a una en el pasado, rechazar
+                    if ($fecha_hora_reserva != $fecha_hora_antigua && $fecha_hora_reserva < $ahora) {
+                        throw new Exception("No puedes cambiar la cita a una fecha u hora que ya pasaron.");
+                    }
+                }
+            }
+        }
+
+        // VALIDACIÓN 2: No permitir citas empalmadas/ocupadas en el mismo horario (excluyendo la actual)
+        $stmt_check = $conn->prepare("SELECT COUNT(*) as cant FROM cita WHERE fecha = ? AND hora = ? AND estado != 'Cancelada' AND id_cita != ?");
+        $stmt_check->bind_param("ssi", $fecha, $hora, $id_cita);
+        $stmt_check->execute();
+        $res_check = $stmt_check->get_result()->fetch_assoc();
+        $stmt_check->close();
+
+        if ($res_check['cant'] > 0) {
+            throw new Exception("Ya existe una cita agendada para la fecha {$fecha} y hora {$hora}. El horario ya está ocupado.");
+        }
+
+        if ($id_cita > 0) {
+            // ACTUALIZAR
+            $stmt = $conn->prepare("UPDATE cita SET id_cliente = ?, fecha = ?, hora = ? WHERE id_cita = ?");
+            $stmt->bind_param("issi", $id_cliente, $fecha, $hora, $id_cita);
+            $stmt->execute();
+            $stmt->close();
+
+            // Actualizar servicios (borrar e insertar)
+            $stmt_del = $conn->prepare("DELETE FROM cita_servicio WHERE id_cita = ?");
+            $stmt_del->bind_param("i", $id_cita);
+            $stmt_del->execute();
+            $stmt_del->close();
+
+            $id_cita_final = $id_cita;
+            $mensaje = "✅ Cita actualizada correctamente";
+        } else {
+            // CREAR
+            $estado = 'Pendiente';
+            $stmt = $conn->prepare("INSERT INTO cita (id_cliente, fecha, hora, estado) VALUES (?, ?, ?, ?)");
+            $stmt->bind_param("isss", $id_cliente, $fecha, $hora, $estado);
+            $stmt->execute();
+            $id_cita_final = $conn->insert_id;
+            $stmt->close();
+            $mensaje = "✅ Cita agendada correctamente para el {$fecha} a las {$hora}";
+        }
 
         // Insertar servicios asociados
         if (!empty($servicios)) {
             $stmt_srv = $conn->prepare("INSERT INTO cita_servicio (id_cita, id_servicio, observaciones) VALUES (?, ?, ?)");
             foreach ($servicios as $id_srv) {
                 $id_srv = intval($id_srv);
-                $stmt_srv->bind_param("iis", $id_cita_new, $id_srv, $observaciones);
+                $stmt_srv->bind_param("iis", $id_cita_final, $id_srv, $observaciones);
                 $stmt_srv->execute();
             }
             $stmt_srv->close();
         }
 
-        $mensaje = "✅ Cita agendada correctamente para el {$fecha} a las {$hora}";
         $tipo_mensaje = "success";
 
-    } catch (mysqli_sql_exception $e) {
-        $mensaje = "Error al guardar: " . $e->getMessage();
+    } catch (Exception $e) {
+        $mensaje = "Error: " . $e->getMessage();
         $tipo_mensaje = "error";
     }
 }
@@ -84,10 +153,58 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['cambiar_estado'])) {
             throw new Exception("Estado inválido");
         }
 
-        $stmt = $conn->prepare("UPDATE cita SET estado = ? WHERE id_cita = ?");
-        $stmt->bind_param("si", $estado, $id_cita);
-        $stmt->execute();
-        $stmt->close();
+        // Verificar si la cita ya estaba completada antes
+        $stmt_check = $conn->prepare("SELECT estado, id_cliente FROM cita WHERE id_cita = ?");
+        $stmt_check->bind_param("i", $id_cita);
+        $stmt_check->execute();
+        $res_check = $stmt_check->get_result()->fetch_assoc();
+        $stmt_check->close();
+
+        // VALIDACIÓN ESTADO COMPLETADO
+        if ($estado === 'Completada' && $res_check && $res_check['estado'] === 'Completada') {
+            throw new Exception("Esta cita ya fue marcada como completada anteriormente.");
+        }
+
+        $conn->begin_transaction(); // Iniciar transacción por seguridad
+        
+        // Calcular los totales si la cita pasa a completada
+        $total_costo = 0.0;
+        $metodo_pago = null;
+        
+        if ($estado === 'Completada') {
+            if (!isset($_POST['metodo_pago']) || empty(trim($_POST['metodo_pago']))) {
+                throw new Exception("Debes especificar un método de pago.");
+            }
+            $metodo_pago = trim($_POST['metodo_pago']);
+            $metodos_validos = ['Efectivo', 'Tarjeta', 'Transferencia'];
+            if (!in_array($metodo_pago, $metodos_validos)) {
+                throw new Exception("Método de pago inválido.");
+            }
+            
+            // 1. Calcular total y obtener los nombres de servicios
+            $stmt_tot = $conn->prepare("SELECT s.precio FROM cita_servicio cs JOIN servicio s ON cs.id_servicio = s.id_servicio WHERE cs.id_cita = ?");
+            $stmt_tot->bind_param("i", $id_cita);
+            $stmt_tot->execute();
+            $res_tot = $stmt_tot->get_result();
+            
+            while ($row_srv = $res_tot->fetch_assoc()) {
+                $total_costo += floatval($row_srv['precio']);
+            }
+            $stmt_tot->close();
+            
+            // Actualizar tabla cita con el total y el metodo de pago
+            $stmt = $conn->prepare("UPDATE cita SET estado = ?, metodo_pago = ?, total_servicios = ?, total_general = ?, fecha_completado = NOW() WHERE id_cita = ?");
+            $stmt->bind_param("ssddi", $estado, $metodo_pago, $total_costo, $total_costo, $id_cita);
+            $stmt->execute();
+            $stmt->close();
+            
+        } else {
+            // Actualización estándar para otros estados
+            $stmt = $conn->prepare("UPDATE cita SET estado = ? WHERE id_cita = ?");
+            $stmt->bind_param("si", $estado, $id_cita);
+            $stmt->execute();
+            $stmt->close();
+        }
 
         // Si se cancela, registrar en tabla cancelacion
         if ($estado === 'Cancelada' && !empty($_POST['motivo'])) {
@@ -97,6 +214,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['cambiar_estado'])) {
             $stmt_c->execute();
             $stmt_c->close();
         }
+
+        $conn->commit();
 
         $mensaje = "Estado de cita actualizado a: {$estado}";
         $tipo_mensaje = "success";
@@ -110,18 +229,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['cambiar_estado'])) {
 // -------------------------------------------------------
 // ELIMINAR CITA (solo admin)
 // -------------------------------------------------------
-if (isset($_GET['eliminar']) && esAdmin()) {
-    try {
-        $id = intval($_GET['eliminar']);
-        $stmt = $conn->prepare("DELETE FROM cita WHERE id_cita = ?");
-        $stmt->bind_param("i", $id);
-        $stmt->execute();
-        $stmt->close();
-        $mensaje = "Cita eliminada correctamente";
-        $tipo_mensaje = "success";
-    } catch (mysqli_sql_exception $e) {
-        $mensaje = "Error al eliminar: " . $e->getMessage();
-        $tipo_mensaje = "error";
+if (isset($_GET['eliminar'])) {
+    if (esAdmin()) {
+        try {
+            $id = intval($_GET['eliminar']);
+            $stmt = $conn->prepare("DELETE FROM cita WHERE id_cita = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $stmt->close();
+            $mensaje = "Cita eliminada correctamente";
+            $tipo_mensaje = "success";
+        } catch (mysqli_sql_exception $e) {
+            $mensaje = "Error al eliminar: " . $e->getMessage();
+            $tipo_mensaje = "error";
+        }
+    } else {
+        $mensaje = "No tienes permisos para eliminar citas. Solo los administradores pueden realizar esta acción.";
+        $tipo_mensaje = "warning";
     }
 }
 
@@ -134,7 +258,7 @@ try {
         $sql_citas = "
             SELECT c.*, cl.nombre as nombre_cliente, cl.telefono,
                    GROUP_CONCAT(s.nombre ORDER BY s.nombre SEPARATOR ', ') as servicios,
-                   GROUP_CONCAT(s.precio ORDER BY s.nombre SEPARATOR ',') as precios
+                   GROUP_CONCAT(s.id_servicio ORDER BY s.nombre SEPARATOR ',') as service_ids
             FROM cita c
             JOIN cliente cl ON c.id_cliente = cl.id_cliente
             LEFT JOIN cita_servicio cs ON c.id_cita = cs.id_cita
@@ -150,7 +274,7 @@ try {
         $sql_citas = "
             SELECT c.*, cl.nombre as nombre_cliente, cl.telefono,
                    GROUP_CONCAT(s.nombre ORDER BY s.nombre SEPARATOR ', ') as servicios,
-                   GROUP_CONCAT(s.precio ORDER BY s.nombre SEPARATOR ',') as precios
+                   GROUP_CONCAT(s.id_servicio ORDER BY s.nombre SEPARATOR ',') as service_ids
             FROM cita c
             JOIN cliente cl ON c.id_cliente = cl.id_cliente
             LEFT JOIN cita_servicio cs ON c.id_cita = cs.id_cita
@@ -717,6 +841,49 @@ for ($h = 8; $h <= 20; $h++) {
         .srv-checkbox:hover { border-color: #667eea; background: #f0f2ff; }
         .srv-checkbox input[type=checkbox] { width: 16px; height: 16px; accent-color: #667eea; }
         .srv-checkbox.checked { border-color: #667eea; background: #ede9fe; }
+        
+        /* Servicios pagination */
+        .srv-pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px dashed #e5e7eb;
+        }
+        .srv-page-btn {
+            background: #f8f9ff;
+            border: 1px solid #667eea;
+            color: #667eea;
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .srv-page-btn:hover:not(:disabled) {
+            background: #667eea;
+            color: white;
+        }
+        .srv-page-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            border-color: #ccc;
+            color: #999;
+        }
+        .srv-page-info {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            min-width: 100px;
+            text-align: center;
+        }
+
         .srv-info { flex: 1; }
         .srv-nombre { font-weight: 600; color: #333; }
         .srv-detalle { color: #888; font-size: 11px; }
@@ -778,6 +945,7 @@ for ($h = 8; $h <= 20; $h++) {
         .btn-estado.pendiente  { background: #dbeafe; color: #1d4ed8; }
         .btn-estado.completada { background: #d1fae5; color: #065f46; }
         .btn-estado.cancelada  { background: #fee2e2; color: #991b1b; }
+        .btn-estado.editar     { background: #ede9fe; color: #6d28d9; }
         .btn-estado:hover { filter: brightness(0.9); transform: translateY(-1px); }
 
         .motivo-group { margin-top: 10px; display: none; }
@@ -792,6 +960,7 @@ for ($h = 8; $h <= 20; $h++) {
             min-height: 60px;
         }
         .required { color: #e74c3c; }
+        <?php echo getPaginationStyles(); ?>
 
         @media (max-width: 768px) {
             .calendar-grid { grid-template-columns: 70px repeat(7, minmax(100px, 1fr)); }
@@ -916,13 +1085,20 @@ for ($h = 8; $h <= 20; $h++) {
         usort($todas_citas, function($a, $b) {
             return strcmp($a['fecha'] . $a['hora'], $b['fecha'] . $b['hora']);
         });
+
+        // Paginación manual para el array de citas semanales
+        $limit_citas = 12;
+        $total_citas = count($todas_citas);
+        $total_pages_citas = ceil($total_citas / $limit_citas);
+        $current_page_citas = isset($_GET['p_citas']) ? max(1, intval($_GET['p_citas'])) : 1;
+        $offset_citas = ($current_page_citas - 1) * $limit_citas;
+        $todas_citas_pag = array_slice($todas_citas, $offset_citas, $limit_citas);
         ?>
 
-        <?php if (!empty($todas_citas)): ?>
+        <?php if (!empty($todas_citas_pag)): ?>
         <table>
             <thead>
                 <tr>
-                    <th>#</th>
                     <th>Cliente</th>
                     <th>Fecha</th>
                     <th>Hora</th>
@@ -932,9 +1108,8 @@ for ($h = 8; $h <= 20; $h++) {
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($todas_citas as $cita): ?>
+                <?php foreach ($todas_citas_pag as $cita): ?>
                 <tr>
-                    <td><strong>#<?php echo $cita['id_cita']; ?></strong></td>
                     <td>
                         <strong><?php echo htmlspecialchars($cita['nombre_cliente']); ?></strong>
                         <?php if (!empty($cita['telefono'])): ?>
@@ -957,7 +1132,7 @@ for ($h = 8; $h <= 20; $h++) {
                             <?php if (esAdmin()): ?>
                             <a href="?eliminar=<?php echo $cita['id_cita']; ?>&semana=<?php echo $semana_offset; ?>"
                                class="delete"
-                               onclick="event.preventDefault(); confirmacion('¿Eliminar esta cita?', '🗑️ Eliminar', () => window.location=this.href)">🗑️ Eliminar</a>
+                               onclick="event.preventDefault(); confirmacion('¿Eliminar esta cita?', '🗑️ Eliminar', () => window.location.href='?eliminar=<?php echo $cita['id_cita']; ?>&semana=<?php echo $semana_offset; ?>')">🗑️ Eliminar</a>
                             <?php endif; ?>
                         </div>
                     </td>
@@ -965,6 +1140,9 @@ for ($h = 8; $h <= 20; $h++) {
                 <?php endforeach; ?>
             </tbody>
         </table>
+        
+        <?php echo renderPagination($current_page_citas, $total_pages_citas, "?semana=$semana_offset&p_citas="); ?>
+        
         <?php else: ?>
         <div class="empty-state">
             <div class="empty-icon">📅</div>
@@ -979,10 +1157,12 @@ for ($h = 8; $h <= 20; $h++) {
 <div class="modal-overlay" id="modalNueva">
     <div class="modal">
         <div class="modal-header">
-            <h3>➕ Nueva Cita</h3>
+            <h3 id="modalNuevaTitle">➕ Nueva Cita</h3>
             <button class="modal-close" onclick="cerrarModal('modalNueva')">&times;</button>
         </div>
         <form method="POST">
+            <input type="hidden" name="id_cita" id="id_cita_nueva" value="0">
+            <input type="hidden" name="semana" value="<?php echo $semana_offset; ?>">
             <div class="modal-body">
                 <?php if (!esCliente()): ?>
                 <div class="form-row">
@@ -1001,7 +1181,7 @@ for ($h = 8; $h <= 20; $h++) {
                     </div>
                 </div>
                 <?php else: ?>
-                    <input type="hidden" name="id_cliente" value="<?php echo $id_cliente_actual ? $id_cliente_actual['id_cliente'] : ''; ?>">
+                    <input type="hidden" name="id_cliente" id="id_cliente" value="<?php echo $id_cliente_actual ? $id_cliente_actual['id_cliente'] : ''; ?>">
                     <?php if ($id_cliente_actual): ?>
                     <div class="detalle-row">
                         <div class="detalle-icon">👤</div>
@@ -1015,12 +1195,12 @@ for ($h = 8; $h <= 20; $h++) {
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="fecha">Fecha <span class="required">*</span></label>
+                        <label for="fecha_nueva">Fecha <span class="required">*</span></label>
                         <input type="date" name="fecha" id="fecha_nueva" 
                                min="<?php echo date('Y-m-d'); ?>" required>
                     </div>
                     <div class="form-group">
-                        <label for="hora">Hora <span class="required">*</span></label>
+                        <label for="hora_nueva">Hora <span class="required">*</span></label>
                         <select name="hora" id="hora_nueva" required>
                             <?php foreach ($horas_atencion as $h): ?>
                             <option value="<?php echo $h; ?>"><?php echo $h; ?></option>
@@ -1050,6 +1230,16 @@ for ($h = 8; $h <= 20; $h++) {
                         }
                         ?>
                     </div>
+                    
+                    <div class="srv-pagination" id="srvPaginationControls" style="display: none;">
+                        <button type="button" class="srv-page-btn" id="btnSrvPrev" onclick="changeSrvPage(-1)">
+                            &laquo; Anterior
+                        </button>
+                        <span class="srv-page-info" id="srvPageInfo">Página 1 de 1</span>
+                        <button type="button" class="srv-page-btn" id="btnSrvNext" onclick="changeSrvPage(1)">
+                            Siguiente &raquo;
+                        </button>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -1059,7 +1249,7 @@ for ($h = 8; $h <= 20; $h++) {
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="cerrarModal('modalNueva')">Cancelar</button>
-                <button type="submit" name="guardar_cita" class="btn btn-primary">💾 Guardar Cita</button>
+                <button type="submit" name="guardar_cita" class="btn btn-primary" id="btnGuardarCita">💾 Guardar Cita</button>
             </div>
         </form>
     </div>
@@ -1086,14 +1276,23 @@ for ($h = 8; $h <= 20; $h++) {
 const CITAS_DATA = <?php
 $citas_js = [];
 foreach ($todas_citas as $cita) {
+    // Obtener observaciones (vienen en la primera fila de cita_servicio usualmente)
+    // En nuestro query, observaciones no está en el GROUP BY pero podemos obtenerlo
+    // Para simplificar, asumiremos que todas las observaciones de una cita son iguales
+    $obs_query = $conn->query("SELECT observaciones FROM cita_servicio WHERE id_cita = " . $cita['id_cita'] . " LIMIT 1");
+    $obs = $obs_query ? $obs_query->fetch_assoc()['observaciones'] : '';
+
     $citas_js[$cita['id_cita']] = [
         'id_cita'        => $cita['id_cita'],
+        'id_cliente'     => $cita['id_cliente'],
         'nombre_cliente' => $cita['nombre_cliente'],
         'telefono'       => $cita['telefono'] ?? '',
         'fecha'          => $cita['fecha'],
         'hora'           => substr($cita['hora'], 0, 5),
         'estado'         => $cita['estado'],
         'servicios'      => $cita['servicios'] ?? '',
+        'service_ids'    => array_map('intval', explode(',', $cita['service_ids'] ?? '')),
+        'observaciones'  => $obs
     ];
 }
 echo json_encode($citas_js, JSON_UNESCAPED_UNICODE);
@@ -1103,10 +1302,55 @@ const ES_ADMIN   = <?php echo esAdmin()   ? 'true' : 'false'; ?>;
 const ES_BARBERO = <?php echo esBarbero() ? 'true' : 'false'; ?>;
 const SEMANA_OFFSET = <?php echo $semana_offset; ?>;
 
-function abrirModalNueva(fecha = '', hora = '') {
-    if (fecha) document.getElementById('fecha_nueva').value = fecha;
-    if (hora)  document.getElementById('hora_nueva').value = hora;
-    document.getElementById('modalNueva').classList.add('active');
+function abrirModalNueva(fecha = '', hora = '', id_cita = 0) {
+    const modal = document.getElementById('modalNueva');
+    const title = document.getElementById('modalNuevaTitle');
+    const btn = document.getElementById('btnGuardarCita');
+    const idInput = document.getElementById('id_cita_nueva');
+    
+    // Reset form
+    idInput.value = '0';
+    title.innerText = '📅 Agendar Nueva Cita';
+    btn.innerText = '💾 Guardar Cita';
+    document.getElementById('fecha_nueva').value = fecha;
+    document.getElementById('hora_nueva').value = hora;
+    document.getElementById('id_cliente').value = '';
+    document.getElementById('observaciones').value = '';
+    
+    // Desmarcar todos los servicios
+    document.querySelectorAll('input[name="servicios[]"]').forEach(cb => {
+        cb.checked = false;
+        toggleSrvLabel(cb);
+    });
+
+    // Reset pagination
+    setTimeout(() => initSrvPagination(), 50);
+
+    if (id_cita > 0) {
+        const c = CITAS_DATA[id_cita];
+        if (c) {
+            idInput.value = id_cita;
+            title.innerText = '✏️ Editar Cita';
+            btn.innerText = '💾 Actualizar Cita';
+            document.getElementById('fecha_nueva').value = c.fecha;
+            document.getElementById('hora_nueva').value = c.hora;
+            document.getElementById('id_cliente').value = c.id_cliente;
+            document.getElementById('observaciones').value = c.observaciones || '';
+            
+            // Marcar servicios
+            if (c.service_ids) {
+                c.service_ids.forEach(sid => {
+                    const cb = document.querySelector(`input[name="servicios[]"][value="${sid}"]`);
+                    if (cb) {
+                        cb.checked = true;
+                        toggleSrvLabel(cb);
+                    }
+                });
+            }
+        }
+    }
+    
+    modal.classList.add('active');
 }
 
 function cerrarModal(id) {
@@ -1116,6 +1360,52 @@ function cerrarModal(id) {
 function toggleSrvLabel(cb) {
     const lbl = document.getElementById('srv-lbl-' + cb.value);
     if (lbl) lbl.classList.toggle('checked', cb.checked);
+}
+
+/* PAGINACIÓN DE SERVICIOS EN EL MODAL */
+let currentSrvPage = 1;
+const srvPerPage = 6;
+
+function initSrvPagination() {
+    const services = document.querySelectorAll('.srv-checkbox');
+    const totalPages = Math.ceil(services.length / srvPerPage);
+    
+    if (totalPages <= 1) {
+        document.getElementById('srvPaginationControls').style.display = 'none';
+        services.forEach(s => s.style.display = 'flex');
+        return;
+    }
+
+    document.getElementById('srvPaginationControls').style.display = 'flex';
+    showSrvPage(1);
+}
+
+function showSrvPage(page) {
+    const services = document.querySelectorAll('.srv-checkbox');
+    const totalPages = Math.ceil(services.length / srvPerPage);
+    
+    if (page < 1) page = 1;
+    if (page > totalPages) page = totalPages;
+    
+    currentSrvPage = page;
+    
+    services.forEach((srv, index) => {
+        const start = (page - 1) * srvPerPage;
+        const end = start + srvPerPage;
+        if (index >= start && index < end) {
+            srv.style.display = 'flex';
+        } else {
+            srv.style.display = 'none';
+        }
+    });
+    
+    document.getElementById('srvPageInfo').innerText = `Página ${page} de ${totalPages}`;
+    document.getElementById('btnSrvPrev').disabled = (page === 1);
+    document.getElementById('btnSrvNext').disabled = (page === totalPages);
+}
+
+function changeSrvPage(delta) {
+    showSrvPage(currentSrvPage + delta);
 }
 
 function verCita(id) {
@@ -1135,6 +1425,15 @@ function verCita(id) {
 
     let botonesEstado = '';
     let formEstado = '';
+    let btnEditar = '';
+
+    if ((ES_ADMIN || ES_BARBERO) && c.estado === 'Pendiente') {
+        btnEditar = `
+            <button type="button" class="btn-estado editar" style="flex:1; padding: 10px 0; font-size: 13px;" onclick="cerrarModal('modalDetalle'); abrirModalNueva('','',${id})">
+                ✏️ Editar Datos
+            </button>
+        `;
+    }
 
     if (ES_ADMIN || ES_BARBERO) {
         formEstado = `
@@ -1153,7 +1452,23 @@ function verCita(id) {
                     <label style="font-size:12px;font-weight:600;color:#666;display:block;margin-bottom:6px;">Motivo de cancelación:</label>
                     <textarea name="motivo" placeholder="Describe el motivo..."></textarea>
                 </div>
-                <button type="submit" class="btn btn-primary" style="margin-top:12px;">💾 Guardar cambios</button>
+                <!-- Bloque de Método de Pago -->
+                <div id="pagoGroup_${id}" style="display:none; margin-top:10px;">
+                    <label style="font-size:12px;font-weight:600;color:#666;display:block;margin-bottom:6px;">Confirmar Método de Pago:</label>
+                    <select name="metodo_pago" style="width:100%; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:13px; outline:none; font-family:inherit;">
+                        <option value="Efectivo">💵 Efectivo</option>
+                        <option value="Tarjeta">💳 Tarjeta</option>
+                        <option value="Transferencia">📲 Transferencia</option>
+                    </select>
+                    <small style="color:#888; font-size:11px; margin-top:4px; display:block;">El total se calculará y registrará automáticamente en Ventas.</small>
+                </div>
+                
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    ${btnEditar}
+                    <button type="submit" class="btn btn-primary" style="flex:1; padding: 10px 0; font-size: 13px; display: flex; align-items: center; justify-content: center; text-align: center;">
+                        💾 Guardar cambios
+                    </button>
+                </div>
             </form>
         `;
     }
@@ -1188,7 +1503,9 @@ function verCita(id) {
                 </span>
             </div>
         </div>
-        ${formEstado}
+        <div style="margin-top:20px; border-top:1px solid #eee; padding-top:10px;">
+            ${formEstado}
+        </div>
     `;
 
     document.getElementById('modalDetalle').classList.add('active');
@@ -1196,9 +1513,17 @@ function verCita(id) {
 
 function setEstado(id, estado) {
     document.getElementById('estadoInput_' + id).value = estado;
-    const grupo = document.getElementById('motivoGroup_' + id);
-    if (grupo) {
-        grupo.style.display = estado === 'Cancelada' ? 'block' : 'none';
+    
+    // Controles de cancelación
+    const grupoCancel = document.getElementById('motivoGroup_' + id);
+    if (grupoCancel) {
+        grupoCancel.style.display = estado === 'Cancelada' ? 'block' : 'none';
+    }
+    
+    // Controles de pago
+    const grupoPago = document.getElementById('pagoGroup_' + id);
+    if (grupoPago) {
+        grupoPago.style.display = estado === 'Completada' ? 'block' : 'none';
     }
 }
 

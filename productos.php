@@ -2,6 +2,7 @@
 // Incluir autenticación
 require_once("auth.php");
 require_once("conexion.php");
+require_once("inc/pagination_helper.php");
 
 // Verificar que sea administrador o barbero
 if (!esAdmin() && !esBarbero()) {
@@ -82,17 +83,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['ajustar_stock'])) {
 
 // ELIMINAR PRODUCTO
 if (isset($_GET['eliminar'])) {
-    try {
-        $id = intval($_GET['eliminar']);
-        $stmt = $conn->prepare("DELETE FROM producto WHERE id_producto = ?");
-        $stmt->bind_param("i", $id);
-        $stmt->execute();
-        $stmt->close();
-        $mensaje = "Producto eliminado correctamente";
-        $tipo_mensaje = "success";
-    } catch (mysqli_sql_exception $e) {
-        $mensaje = "Error al eliminar: " . $e->getMessage();
-        $tipo_mensaje = "error";
+    if (esAdmin()) {
+        try {
+            $id = intval($_GET['eliminar']);
+            $stmt = $conn->prepare("DELETE FROM producto WHERE id_producto = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $stmt->close();
+            $mensaje = "Producto eliminado correctamente";
+            $tipo_mensaje = "success";
+        } catch (mysqli_sql_exception $e) {
+            $mensaje = "Error al eliminar producto: " . $e->getMessage();
+            $tipo_mensaje = "error";
+        }
+    } else {
+        $mensaje = "No tienes permisos para eliminar productos. Solo los administradores pueden realizar esta acción.";
+        $tipo_mensaje = "warning";
     }
 }
 
@@ -107,9 +113,13 @@ if (isset($_GET['editar'])) {
     $stmt->close();
 }
 
-// CONSULTAR PRODUCTOS
+// CONSULTAR PRODUCTOS CON PAGINACIÓN
 try {
-    $productos = $conn->query("SELECT * FROM producto ORDER BY nombre");
+    $pagData = getPaginationData($conn, "SELECT COUNT(*) as total FROM producto", 12);
+    $limit = 12;
+    $offset = $pagData['offset'];
+    
+    $productos = $conn->query("SELECT * FROM producto ORDER BY nombre LIMIT $limit OFFSET $offset");
     
     // Calcular valor total del inventario
     $valor_inventario = $conn->query("SELECT SUM(stock * precio) as total FROM producto")->fetch_assoc()['total'] ?? 0;
@@ -518,6 +528,8 @@ try {
             border: none;
         }
         
+        <?php echo getPaginationStyles(); ?>
+        
         .close:hover {
             color: #333;
         }
@@ -636,7 +648,6 @@ try {
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
                     <th>Producto</th>
                     <th>Stock</th>
                     <th>Precio</th>
@@ -647,7 +658,6 @@ try {
             <tbody>
                 <?php while($row = $productos->fetch_assoc()): ?>
                 <tr>
-                    <td><strong>#<?php echo $row['id_producto']; ?></strong></td>
                     <td><?php echo htmlspecialchars($row['nombre']); ?></td>
                     <td>
                         <?php 
@@ -675,7 +685,7 @@ try {
                             <a href="?editar=<?php echo $row['id_producto']; ?>">✏️ Editar</a>
                             <a href="?eliminar=<?php echo $row['id_producto']; ?>" 
                                class="delete"
-                               onclick="event.preventDefault(); confirmacion('¿Estás seguro de eliminar este producto?', '🗑️ Eliminar', () => window.location=this.href)">
+                               onclick="event.preventDefault(); confirmacion('¿Estás seguro de eliminar este producto?', '🗑️ Eliminar', () => window.location.href='?eliminar=<?php echo $row['id_producto']; ?>')">
                                🗑️ Eliminar
                             </a>
                         </div>
@@ -684,6 +694,9 @@ try {
                 <?php endwhile; ?>
             </tbody>
         </table>
+        
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages']); ?>
+        
         <?php else: ?>
         <div class="empty-state">
             <p>No hay productos registrados en el inventario</p>

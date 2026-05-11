@@ -2,6 +2,7 @@
 // Incluir autenticación
 require_once("auth.php");
 require_once("conexion.php");
+require_once("inc/pagination_helper.php");
 
 // Verificar que sea administrador o barbero
 if (!esAdmin() && !esBarbero()) {
@@ -45,17 +46,22 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar'])) {
 
 // ELIMINAR CLIENTE
 if (isset($_GET['eliminar'])) {
-    try {
-        $id = intval($_GET['eliminar']);
-        $stmt = $conn->prepare("DELETE FROM cliente WHERE id_cliente = ?");
-        $stmt->bind_param("i", $id);
-        $stmt->execute();
-        $stmt->close();
-        $mensaje = "Cliente eliminado correctamente";
-        $tipo_mensaje = "success";
-    } catch (mysqli_sql_exception $e) {
-        $mensaje = "Error al eliminar: " . $e->getMessage();
-        $tipo_mensaje = "error";
+    if (esAdmin()) {
+        try {
+            $id = intval($_GET['eliminar']);
+            $stmt = $conn->prepare("DELETE FROM cliente WHERE id_cliente = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $stmt->close();
+            $mensaje = "Cliente eliminado correctamente";
+            $tipo_mensaje = "success";
+        } catch (mysqli_sql_exception $e) {
+            $mensaje = "Error al eliminar cliente: " . $e->getMessage();
+            $tipo_mensaje = "error";
+        }
+    } else {
+        $mensaje = "No tienes permisos para eliminar clientes. Solo los administradores pueden realizar esta acción.";
+        $tipo_mensaje = "warning";
     }
 }
 
@@ -63,20 +69,30 @@ if (isset($_GET['eliminar'])) {
 $cliente_editar = null;
 if (isset($_GET['editar'])) {
     $id = intval($_GET['editar']);
-    $stmt = $conn->prepare("SELECT * FROM cliente WHERE id_cliente = ?");
+    $stmt = $conn->prepare("
+        SELECT c.*, u.nombre_usuario 
+        FROM cliente c 
+        LEFT JOIN usuario u ON c.id_usuario = u.id_usuario 
+        WHERE c.id_cliente = ?
+    ");
     $stmt->bind_param("i", $id);
     $stmt->execute();
     $cliente_editar = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 }
 
-// CONSULTAR CLIENTES
+// CONSULTAR CLIENTES CON PAGINACIÓN
 try {
+    $pagData = getPaginationData($conn, "SELECT COUNT(*) as total FROM cliente", 12);
+    $limit = 12;
+    $offset = $pagData['offset'];
+    
     $clientes = $conn->query("
         SELECT c.*, u.nombre_usuario 
         FROM cliente c
         LEFT JOIN usuario u ON c.id_usuario = u.id_usuario
         ORDER BY c.id_cliente DESC
+        LIMIT $limit OFFSET $offset
     ");
 } catch (mysqli_sql_exception $e) {
     $clientes = false;
@@ -361,6 +377,7 @@ try {
         .required {
             color: #e74c3c;
         }
+        <?php echo getPaginationStyles(); ?>
     </style>
 </head>
 <body>
@@ -450,14 +467,13 @@ try {
     </div>
     
     <!-- Tabla de Clientes -->
-    <div class="table-section">
+    <div class="table-section" id="seccion-clientes">
         <h3>Lista de Clientes</h3>
         
         <?php if($clientes && $clientes->num_rows > 0): ?>
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
                     <th>Nombre</th>
                     <th>Teléfono</th>
                     <th>Usuario Vinculado</th>
@@ -467,7 +483,6 @@ try {
             <tbody>
                 <?php while($row = $clientes->fetch_assoc()): ?>
                 <tr>
-                    <td><strong>#<?php echo $row['id_cliente']; ?></strong></td>
                     <td><?php echo htmlspecialchars($row['nombre']); ?></td>
                     <td><?php echo htmlspecialchars($row['telefono'] ?? 'Sin teléfono'); ?></td>
                     <td>
@@ -484,7 +499,7 @@ try {
                             <a href="?editar=<?php echo $row['id_cliente']; ?>">✏️ Editar</a>
                             <a href="?eliminar=<?php echo $row['id_cliente']; ?>" 
                                class="delete"
-                               onclick="event.preventDefault(); confirmacion('¿Estás seguro de eliminar este cliente?\nTambién se eliminarán todas sus citas.', '🗑️ Eliminar', () => window.location=this.href)">
+                               onclick="event.preventDefault(); confirmacion('¿Estás seguro de eliminar este cliente?\nTambién se eliminarán todas sus citas.', '🗑️ Eliminar', () => window.location.href='?eliminar=<?php echo $row['id_cliente']; ?>')">
                                🗑️ Eliminar
                             </a>
                         </div>
@@ -493,6 +508,14 @@ try {
                 <?php endwhile; ?>
             </tbody>
         </table>
+        
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages']); ?>
+        <script>
+            document.querySelectorAll('#seccion-clientes .page-link').forEach(link => {
+                if (link.href && !link.href.includes('#')) link.href += '#seccion-clientes';
+            });
+        </script>
+        
         <?php else: ?>
         <div class="empty-state">
             <p>No hay clientes registrados</p>

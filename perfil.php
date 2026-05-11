@@ -358,15 +358,8 @@ if ($_SESSION['id_rol'] == 3) {
     <div class="form-section">
         <h3>Información de Cuenta</h3>
         <form method="POST">
-            <div class="form-group">
-                <label for="id_usuario">ID de Usuario</label>
-                <input 
-                    type="text" 
-                    id="id_usuario"
-                    value="#<?php echo $usuario_actual['id_usuario']; ?>"
-                    readonly
-                >
-            </div>
+            <!-- ID de usuario oculto según requerimiento -->
+            <input type="hidden" id="id_usuario" value="<?php echo $usuario_actual['id_usuario']; ?>">
             
             <div class="form-group">
                 <label for="nombre_usuario">Nombre de Usuario <span class="required">*</span></label>
