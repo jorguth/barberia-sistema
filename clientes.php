@@ -467,7 +467,7 @@ try {
     </div>
     
     <!-- Tabla de Clientes -->
-    <div class="table-section" id="seccion-clientes">
+    <div class="table-section" id="tabla-clientes">
         <h3>Lista de Clientes</h3>
         
         <?php if($clientes && $clientes->num_rows > 0): ?>
@@ -509,12 +509,7 @@ try {
             </tbody>
         </table>
         
-        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages']); ?>
-        <script>
-            document.querySelectorAll('#seccion-clientes .page-link').forEach(link => {
-                if (link.href && !link.href.includes('#')) link.href += '#seccion-clientes';
-            });
-        </script>
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], '', 'p', '#tabla-clientes'); ?>
         
         <?php else: ?>
         <div class="empty-state">

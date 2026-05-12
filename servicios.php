@@ -438,7 +438,7 @@ try {
     </div>
     
     <!-- Tabla de Servicios -->
-    <div class="table-section">
+    <div class="table-section" id="catalogo-servicios">
         <h3>Catálogo de Servicios</h3>
         
         <?php if($servicios && $servicios->num_rows > 0): ?>
@@ -476,7 +476,7 @@ try {
             </tbody>
         </table>
         
-        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages']); ?>
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], '', 'p', '#catalogo-servicios'); ?>
         
         <?php else: ?>
         <div class="empty-state">

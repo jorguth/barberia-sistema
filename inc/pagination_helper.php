@@ -35,7 +35,7 @@ function getPaginationData($conn, $countQuery, $limit = 10, $pageVar = 'p') {
 /**
  * Renderiza el HTML de la paginación
  */
-function renderPagination($currentPage, $totalPages, $urlParams = '', $pageVar = 'p') {
+function renderPagination($currentPage, $totalPages, $urlParams = '', $pageVar = 'p', $anchor = '') {
     if ($totalPages <= 1) return '';
 
     $html = '<div class="pagination-container">';
@@ -48,7 +48,7 @@ function renderPagination($currentPage, $totalPages, $urlParams = '', $pageVar =
 
     // Botón Anterior
     if ($currentPage > 1) {
-        $html .= '<a href="' . $urlParams . $connector . $pageVar . '=' . ($currentPage - 1) . '" class="page-link prev">&laquo; Anterior</a>';
+        $html .= '<a href="' . $urlParams . $connector . $pageVar . '=' . ($currentPage - 1) . $anchor . '" class="page-link prev">&laquo; Anterior</a>';
     } else {
         $html .= '<span class="page-link disabled">&laquo; Anterior</span>';
     }
@@ -58,23 +58,23 @@ function renderPagination($currentPage, $totalPages, $urlParams = '', $pageVar =
     $end = min($totalPages, $currentPage + 2);
 
     if ($start > 1) {
-        $html .= '<a href="' . $urlParams . $connector . $pageVar . '=1" class="page-link">1</a>';
+        $html .= '<a href="' . $urlParams . $connector . $pageVar . '=1' . $anchor . '" class="page-link">1</a>';
         if ($start > 2) $html .= '<span class="page-dots">...</span>';
     }
 
     for ($i = $start; $i <= $end; $i++) {
         $active = ($i == $currentPage) ? 'active' : '';
-        $html .= '<a href="' . $urlParams . $connector . $pageVar . '=' . $i . '" class="page-link ' . $active . '">' . $i . '</a>';
+        $html .= '<a href="' . $urlParams . $connector . $pageVar . '=' . $i . $anchor . '" class="page-link ' . $active . '">' . $i . '</a>';
     }
 
     if ($end < $totalPages) {
         if ($end < $totalPages - 1) $html .= '<span class="page-dots">...</span>';
-        $html .= '<a href="' . $urlParams . $connector . $pageVar . '=' . $totalPages . '" class="page-link">' . $totalPages . '</a>';
+        $html .= '<a href="' . $urlParams . $connector . $pageVar . '=' . $totalPages . $anchor . '" class="page-link">' . $totalPages . '</a>';
     }
 
     // Botón Siguiente
     if ($currentPage < $totalPages) {
-        $html .= '<a href="' . $urlParams . $connector . $pageVar . '=' . ($currentPage + 1) . '" class="page-link next">Siguiente &raquo;</a>';
+        $html .= '<a href="' . $urlParams . $connector . $pageVar . '=' . ($currentPage + 1) . $anchor . '" class="page-link next">Siguiente &raquo;</a>';
     } else {
         $html .= '<span class="page-link disabled">Siguiente &raquo;</span>';
     }

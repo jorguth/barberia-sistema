@@ -417,7 +417,7 @@ try {
     </div>
     
     <!-- Tabla de Usuarios -->
-    <div class="table-section">
+    <div class="table-section" id="tabla-usuarios">
         <h3>Lista de Usuarios Registrados</h3>
         
         <?php if($usuarios && $usuarios->num_rows > 0): ?>
@@ -454,7 +454,7 @@ try {
             </tbody>
         </table>
         
-        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages']); ?>
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], '', 'p', '#tabla-usuarios'); ?>
         
         <?php else: ?>
         <div class="empty-state">

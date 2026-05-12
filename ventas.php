@@ -648,15 +648,7 @@ $total_periodo = $conn->query("
                     </table>
                     
                     <div style="padding: 10px;">
-                        <?php echo renderPagination($pagDataProd['current_page'], $pagDataProd['total_pages'], "?desde=$filtro_desde&hasta=$filtro_hasta&p=" . ($pagData['current_page'] ?? 1), 'p_prod'); ?>
-                        <script>
-                            // Reforzar enlaces de productos con el ancla del card
-                            document.querySelectorAll('#card-productos .page-link').forEach(link => {
-                                if (link.href && !link.href.includes('#')) {
-                                    link.href += '#card-productos';
-                                }
-                            });
-                        </script>
+                        <?php echo renderPagination($pagDataProd['current_page'], $pagDataProd['total_pages'], "?desde=$filtro_desde&hasta=$filtro_hasta&p=" . ($pagData['current_page'] ?? 1), 'p_prod', '#card-productos'); ?>
                     </div>
                 </div>
             </div>
@@ -723,15 +715,7 @@ $total_periodo = $conn->query("
             </tbody>
         </table>
         
-        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], "?desde=$filtro_desde&hasta=$filtro_hasta&p_prod=" . ($pagDataProd['current_page'] ?? 1)); ?>
-        <script>
-            // Reforzar enlaces de historial con el ancla de su sección
-            document.querySelectorAll('#historial-ventas .page-link').forEach(link => {
-                if (link.href && !link.href.includes('#')) {
-                    link.href += '#historial-ventas';
-                }
-            });
-        </script>
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], "?desde=$filtro_desde&hasta=$filtro_hasta&p_prod=" . ($pagDataProd['current_page'] ?? 1), 'p', '#historial-ventas'); ?>
         
         <?php else: ?>
         <div class="empty-state">

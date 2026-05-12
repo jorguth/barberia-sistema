@@ -1069,7 +1069,7 @@ for ($h = 8; $h <= 20; $h++) {
     </div>
 
     <!-- LISTA DE CITAS DE LA SEMANA -->
-    <div class="lista-section">
+    <div class="lista-section" id="lista-semanal">
         <div class="lista-header">
             <h3>📋 Lista de Citas de la Semana</h3>
         </div>
@@ -1141,7 +1141,7 @@ for ($h = 8; $h <= 20; $h++) {
             </tbody>
         </table>
         
-        <?php echo renderPagination($current_page_citas, $total_pages_citas, "?semana=$semana_offset&p_citas="); ?>
+        <?php echo renderPagination($current_page_citas, $total_pages_citas, "?semana=$semana_offset&p_citas=", 'p_citas', '#lista-semanal'); ?>
         
         <?php else: ?>
         <div class="empty-state">

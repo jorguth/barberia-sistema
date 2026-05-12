@@ -641,7 +641,7 @@ try {
     </div>
     
     <!-- Tabla de Productos -->
-    <div class="table-section">
+    <div class="table-section" id="inventario-productos">
         <h3>Inventario de Productos</h3>
         
         <?php if($productos && $productos->num_rows > 0): ?>
@@ -695,7 +695,7 @@ try {
             </tbody>
         </table>
         
-        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages']); ?>
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], '', 'p', '#inventario-productos'); ?>
         
         <?php else: ?>
         <div class="empty-state">

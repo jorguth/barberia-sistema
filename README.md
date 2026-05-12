@@ -1,27 +1,42 @@
-# Barbería PO - Sistema de Gestión
+# 💈 Sistema de Gestión: Barbería PO
 
-Este es un sistema de gestión para una barbería, desarrollado en PHP y MySQL.
+¡Bienvenido al sistema de gestión integral para barberías! Esta aplicación está diseñada para facilitar la administración diaria, desde la agenda de citas hasta el control financiero y reportes.
 
-## Requisitos Previos
-
--   **PHP 7.3+** (ya incluido en AppServ o XAMPP).
--   **MySQL/MariaDB**.
-
-## Guía de Configuración Rápida
-
-### 1. Preparar la Base de Datos
--   Abre **phpMyAdmin** (normalmente en `http://localhost/phpMyAdmin`).
--   Crea una base de datos llamada `barberiadb`.
--   Importa el archivo SQL ubicado en `database/base de datos barberia.sql`.
-
-### 2. Configurar la Conexión
--   Abre el archivo `config.php`.
--   Asegúrate de que los valores de `DB_USERNAME` y `DB_PASSWORD` coincidan con tu configuración de MySQL (en AppServ el usuario suele ser `root` y la contraseña la que elegiste al instalar).
-
-### 3. Ejecutar el Proyecto (Más Fácil)
--   Haz doble clic en el archivo `run.bat`.
--   Esto iniciará un servidor local automáticamente.
--   Abre tu navegador y ve a: **[http://localhost:8000](http://localhost:8000)**.
+## 📋 Resumen del Proyecto
+El sistema permite a los administradores y barberos gestionar sus agendas de manera eficiente, registrar ventas automáticamente al completar servicios y obtener métricas valiosas sobre el rendimiento del negocio.
 
 ---
-**Nota:** El script `run.bat` usa el servidor integrado de PHP, lo cual es ideal para desarrollo rápido sin tener que configurar Apache manualmente.
+
+## 📚 Documentación Detallada
+Para una guía técnica sobre el funcionamiento de los módulos, roles y validaciones, consulta:
+👉 **[DOCUMENTACION.md](./DOCUMENTACION.md)**
+
+Para aprender a usar el sistema paso a paso (Manual de Usuario), consulta:
+👉 **[GUIA_USUARIO.md](./GUIA_USUARIO.md)**
+
+---
+
+## 🛠️ Instalación Rápida
+
+### 1. Base de Datos
+- Crea una base de datos llamada `barberiadb` en tu servidor MySQL.
+- Importa el archivo SQL: `database/base de datos barberia.sql`.
+
+### 2. Configuración
+- Configura tus credenciales en `config.php` o `conexion.php`.
+
+### 3. Ejecución
+Si tienes PHP instalado en tu PATH, simplemente ejecuta:
+```bash
+run.bat
+```
+Luego accede a: **[http://localhost:8000](http://localhost:8000)**.
+
+---
+
+## ✨ Características Destacadas
+- **Agenda Interactiva:** Calendario semanal para gestión de citas.
+- **Ventas Automatizadas:** Generación de facturas al finalizar servicios.
+- **Seguridad:** Validaciones de servidor contra inyecciones y errores de lógica.
+- **Reportes:** Dashboard con gráficos de ingresos y servicios.
+
