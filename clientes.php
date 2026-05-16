@@ -3,6 +3,7 @@
 require_once("auth.php");
 require_once("conexion.php");
 require_once("inc/pagination_helper.php");
+$conn->query("SET time_zone = '-06:00'"); // America/Mexico_City (CST)
 
 // Verificar que sea administrador o barbero
 if (!esAdmin() && !esBarbero()) {
@@ -99,17 +100,37 @@ if (isset($_GET['editar'])) {
     $stmt->close();
 }
 
-// CONSULTAR CLIENTES CON PAGINACIÓN
+// CONSULTAR CLIENTES CON PAGINACIÓN Y BÚSQUEDA
 try {
-    $pagData = getPaginationData($conn, "SELECT COUNT(*) as total FROM cliente", 12);
+    $search = isset($_GET['q']) ? trim($_GET['q']) : '';
+    $where_sql = "";
+    if ($search !== '') {
+        $where_sql = " WHERE c.nombre LIKE '%" . $conn->real_escape_string($search) . "%' OR c.telefono LIKE '%" . $conn->real_escape_string($search) . "%'";
+    }
+
+    // Obtener los IDs de los últimos 3 clientes para la lógica de "NUEVO"
+    $res_top = $conn->query("SELECT id_cliente FROM cliente ORDER BY id_cliente DESC LIMIT 3");
+    $top_ids = [];
+    while($r = $res_top->fetch_assoc()) $top_ids[] = $r['id_cliente'];
+    $top_ids_str = !empty($top_ids) ? implode(',', $top_ids) : '0';
+
+    $pagData = getPaginationData($conn, "SELECT COUNT(*) as total FROM cliente c $where_sql", 12);
     $limit = 12;
     $offset = $pagData['offset'];
     
+    // Lógica de orden:
+    // 1. Los 3 últimos con menos de 2 minutos van arriba
+    // 2. Pasados los 2 minutos o si no son de los 3 últimos, se ordenan alfabéticamente
+    $time_limit = date('Y-m-d H:i:s', strtotime('-2 minutes'));
     $clientes = $conn->query("
-        SELECT c.*, u.nombre_usuario 
+        SELECT c.*, u.nombre_usuario,
+        (c.creado_en > (NOW() - INTERVAL 2 MINUTE) AND c.id_cliente IN ($top_ids_str)) as es_nuevo 
         FROM cliente c
         LEFT JOIN usuario u ON c.id_usuario = u.id_usuario
-        ORDER BY c.id_cliente DESC
+        $where_sql
+        ORDER BY es_nuevo DESC, 
+                 IF(c.creado_en > (NOW() - INTERVAL 2 MINUTE) AND c.id_cliente IN ($top_ids_str), c.id_cliente, 0) DESC, 
+                 c.nombre ASC
         LIMIT $limit OFFSET $offset
     ");
 } catch (mysqli_sql_exception $e) {
@@ -491,7 +512,22 @@ try {
     
     <!-- Tabla de Clientes -->
     <div class="table-section" id="tabla-clientes">
-        <h3>Lista de Clientes</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">
+            <h3 style="border:none; margin:0; padding:0;">Lista de Clientes</h3>
+            
+            <form id="searchForm" style="display: flex; gap: 8px;">
+                <input 
+                    type="text" 
+                    id="searchInput"
+                    name="q" 
+                    placeholder="Buscar cliente..." 
+                    value="<?php echo htmlspecialchars($search); ?>"
+                    autocomplete="off"
+                    style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 200px;"
+                >
+                <button type="submit" class="btn btn-primary" style="padding: 8px 15px; font-size: 13px;">🔍</button>
+            </form>
+        </div>
         
         <?php if($clientes && $clientes->num_rows > 0): ?>
         <table>
@@ -505,8 +541,13 @@ try {
             </thead>
             <tbody>
                 <?php while($row = $clientes->fetch_assoc()): ?>
-                <tr>
-                    <td><?php echo htmlspecialchars($row['nombre']); ?></td>
+                <tr <?php echo ($row['es_nuevo']) ? 'style="background: #f0f4ff; border-left: 4px solid #667eea;"' : ''; ?>>
+                    <td>
+                        <?php echo htmlspecialchars($row['nombre']); ?>
+                        <?php if ($row['es_nuevo']): ?>
+                            <span style="font-size: 10px; background: #667eea; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; font-weight: 700;">NUEVO</span>
+                        <?php endif; ?>
+                    </td>
                     <td><?php echo htmlspecialchars($row['telefono'] ?? 'Sin teléfono'); ?></td>
                     <td>
                         <?php if($row['id_usuario']): ?>
@@ -532,7 +573,7 @@ try {
             </tbody>
         </table>
         
-        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], '', 'p', '#tabla-clientes'); ?>
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], "q=" . urlencode($search), 'p', '#tabla-clientes'); ?>
         
         <?php else: ?>
         <div class="empty-state">
@@ -547,5 +588,43 @@ try {
 </div> <!-- .dashboard-layout -->
 
 <?php include 'inc/ui.php'; ?>
+<script>
+    // Búsqueda automática con debounce (500ms)
+    let searchTimeout;
+    const searchInput = document.getElementById('searchInput');
+    const searchForm = document.getElementById('searchForm');
+
+    if (searchInput && searchForm) {
+        searchInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            
+            // Filtrado inmediato
+            const term = this.value.toLowerCase().trim();
+            const rows = document.querySelectorAll('table tbody tr');
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(term) ? '' : 'none';
+            });
+
+            // Búsqueda global en el servidor
+            searchTimeout = setTimeout(() => {
+                const currentQ = "<?php echo addslashes($search); ?>";
+                if (this.value.trim() !== currentQ) {
+                    searchForm.submit();
+                }
+            }, 600);
+        });
+
+        // Mantener el foco
+        window.addEventListener('load', () => {
+            if (searchInput.value !== "") {
+                searchInput.focus();
+                const val = searchInput.value;
+                searchInput.value = '';
+                searchInput.value = val;
+            }
+        });
+    }
+</script>
 </body>
 </html>

@@ -3,6 +3,7 @@
 require_once("auth.php");
 require_once("conexion.php");
 require_once("inc/pagination_helper.php");
+$conn->query("SET time_zone = '-06:00'"); // America/Mexico_City (CST)
 
 // Verificar que sea administrador o barbero
 if (!esAdmin() && !esBarbero()) {
@@ -21,22 +22,37 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar'])) {
         $duracion = intval($_POST['duracion_minutos']);
         $precio = floatval($_POST['precio']);
         
-        if ($id > 0) {
-            // ACTUALIZAR
-            $stmt = $conn->prepare("UPDATE servicio SET nombre = ?, duracion_minutos = ?, precio = ? WHERE id_servicio = ?");
-            $stmt->bind_param("sidi", $nombre, $duracion, $precio, $id);
-            $stmt->execute();
-            $mensaje = "Servicio actualizado correctamente";
+        // VALIDACIÓN: Duración máxima 2 horas (120 min)
+        if ($duracion > 120) {
+            $mensaje = "Error: La duración máxima permitida es de 120 minutos (2 horas).";
+            $tipo_mensaje = "error";
         } else {
-            // CREAR
-            $stmt = $conn->prepare("INSERT INTO servicio (nombre, duracion_minutos, precio) VALUES (?, ?, ?)");
-            $stmt->bind_param("sid", $nombre, $duracion, $precio);
-            $stmt->execute();
-            $mensaje = "Servicio registrado correctamente";
+            // VERIFICAR DUPLICADOS
+            $stmt_check = $conn->prepare("SELECT id_servicio FROM servicio WHERE nombre = ? AND id_servicio != ?");
+            $stmt_check->bind_param("si", $nombre, $id);
+            $stmt_check->execute();
+            if ($stmt_check->get_result()->num_rows > 0) {
+                $mensaje = "Error: Ya existe un servicio con el nombre '$nombre'.";
+                $tipo_mensaje = "error";
+            } else if ($id > 0) {
+                // ACTUALIZAR
+                $stmt = $conn->prepare("UPDATE servicio SET nombre = ?, duracion_minutos = ?, precio = ? WHERE id_servicio = ?");
+                $stmt->bind_param("sidi", $nombre, $duracion, $precio, $id);
+                $stmt->execute();
+                $mensaje = "Servicio actualizado correctamente";
+                $tipo_mensaje = "success";
+                $stmt->close();
+            } else {
+                // CREAR
+                $stmt = $conn->prepare("INSERT INTO servicio (nombre, duracion_minutos, precio) VALUES (?, ?, ?)");
+                $stmt->bind_param("sid", $nombre, $duracion, $precio);
+                $stmt->execute();
+                $mensaje = "Servicio registrado correctamente";
+                $tipo_mensaje = "success";
+                $stmt->close();
+            }
+            $stmt_check->close();
         }
-        
-        $tipo_mensaje = "success";
-        $stmt->close();
         
     } catch (mysqli_sql_exception $e) {
         $mensaje = "Error: " . $e->getMessage();
@@ -76,13 +92,36 @@ if (isset($_GET['editar'])) {
     $stmt->close();
 }
 
-// CONSULTAR SERVICIOS CON PAGINACIÓN
+// CONSULTAR SERVICIOS CON PAGINACIÓN Y BÚSQUEDA
 try {
-    $pagData = getPaginationData($conn, "SELECT COUNT(*) as total FROM servicio", 12);
+    $search = isset($_GET['q']) ? trim($_GET['q']) : '';
+    $where_sql = "";
+    if ($search !== '') {
+        $where_sql = " WHERE nombre LIKE '%" . $conn->real_escape_string($search) . "%'";
+    }
+
+    // Obtener los IDs de los últimos 3 servicios registrados para la lógica de "NUEVO"
+    $res_top = $conn->query("SELECT id_servicio FROM servicio ORDER BY id_servicio DESC LIMIT 3");
+    $top_ids = [];
+    while($r = $res_top->fetch_assoc()) $top_ids[] = $r['id_servicio'];
+    $top_ids_str = !empty($top_ids) ? implode(',', $top_ids) : '0';
+
+    $pagData = getPaginationData($conn, "SELECT COUNT(*) as total FROM servicio $where_sql", 12);
     $limit = 12;
     $offset = $pagData['offset'];
     
-    $servicios = $conn->query("SELECT * FROM servicio ORDER BY nombre LIMIT $limit OFFSET $offset");
+    // Lógica de orden: 
+    // 1. Los que cumplen ser de los últimos 3 Y tener menos de 2 min van arriba
+    // 2. Entre los nuevos, el más reciente primero
+    // 3. El resto alfabéticamente
+    $servicios = $conn->query("SELECT *, 
+                               (creado_en > (NOW() - INTERVAL 2 MINUTE) AND id_servicio IN ($top_ids_str)) as es_nuevo 
+                               FROM servicio 
+                               $where_sql 
+                               ORDER BY es_nuevo DESC, 
+                                        IF(creado_en > (NOW() - INTERVAL 2 MINUTE) AND id_servicio IN ($top_ids_str), id_servicio, 0) DESC, 
+                                        nombre ASC 
+                               LIMIT $limit OFFSET $offset");
 } catch (mysqli_sql_exception $e) {
     $servicios = false;
 }
@@ -404,10 +443,11 @@ try {
                         name="duracion_minutos" 
                         placeholder="Ej: 30"
                         min="1"
+                        max="120"
                         value="<?php echo $servicio_editar ? $servicio_editar['duracion_minutos'] : ''; ?>"
                         required
                     >
-                    <span class="input-hint">Tiempo aproximado del servicio</span>
+                    <span class="input-hint">Tiempo aproximado (Máx 120 min)</span>
                 </div>
                 
                 <div class="form-group">
@@ -439,7 +479,22 @@ try {
     
     <!-- Tabla de Servicios -->
     <div class="table-section" id="catalogo-servicios">
-        <h3>Catálogo de Servicios</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">
+            <h3 style="border:none; margin:0; padding:0;">Catálogo de Servicios</h3>
+            
+            <form id="searchForm" style="display: flex; gap: 8px;">
+                <input 
+                    type="text" 
+                    id="searchInput"
+                    name="q" 
+                    placeholder="Buscar servicio..." 
+                    value="<?php echo htmlspecialchars($search); ?>"
+                    autocomplete="off"
+                    style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 200px;"
+                >
+                <button type="submit" class="btn btn-primary" style="padding: 8px 15px; font-size: 13px;">🔍</button>
+            </form>
+        </div>
         
         <?php if($servicios && $servicios->num_rows > 0): ?>
         <table>
@@ -453,8 +508,13 @@ try {
             </thead>
             <tbody>
                 <?php while($row = $servicios->fetch_assoc()): ?>
-                <tr>
-                    <td><?php echo htmlspecialchars($row['nombre']); ?></td>
+                <tr <?php echo ($row['es_nuevo']) ? 'style="background: #f0f4ff; border-left: 4px solid #667eea;"' : ''; ?>>
+                    <td>
+                        <?php echo htmlspecialchars($row['nombre']); ?>
+                        <?php if ($row['es_nuevo']): ?>
+                            <span style="font-size: 10px; background: #667eea; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; font-weight: 700;">NUEVO</span>
+                        <?php endif; ?>
+                    </td>
                     <td>
                         <span class="duration">⏱️ <?php echo $row['duracion_minutos']; ?> min</span>
                     </td>
@@ -476,7 +536,7 @@ try {
             </tbody>
         </table>
         
-        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], '', 'p', '#catalogo-servicios'); ?>
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], "q=" . urlencode($search), 'p', '#catalogo-servicios'); ?>
         
         <?php else: ?>
         <div class="empty-state">
@@ -491,5 +551,42 @@ try {
 </div> <!-- .dashboard-layout -->
 
 <?php include 'inc/ui.php'; ?>
+
+<script>
+    // Búsqueda automática con debounce (500ms)
+    let searchTimeout;
+    const searchInput = document.getElementById('searchInput');
+    const searchForm = document.getElementById('searchForm');
+
+    searchInput.addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        
+        // Efecto visual inmediato para el usuario
+        const term = this.value.toLowerCase().trim();
+        const rows = document.querySelectorAll('table tbody tr');
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(term) ? '' : 'none';
+        });
+
+        // Búsqueda global en el servidor
+        searchTimeout = setTimeout(() => {
+            const currentQ = "<?php echo addslashes($search); ?>";
+            if (this.value.trim() !== currentQ) {
+                searchForm.submit();
+            }
+        }, 600);
+    });
+
+    // Mantener el foco al final del texto después de recargar
+    window.addEventListener('load', () => {
+        if (searchInput.value !== "") {
+            searchInput.focus();
+            const val = searchInput.value;
+            searchInput.value = '';
+            searchInput.value = val;
+        }
+    });
+</script>
 </body>
 </html>

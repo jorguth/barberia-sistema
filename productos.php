@@ -3,6 +3,7 @@
 require_once("auth.php");
 require_once("conexion.php");
 require_once("inc/pagination_helper.php");
+$conn->query("SET time_zone = '-06:00'"); // America/Mexico_City (CST)
 
 // Verificar que sea administrador o barbero
 if (!esAdmin() && !esBarbero()) {
@@ -21,18 +22,30 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar'])) {
         $stock = intval($_POST['stock']);
         $precio = floatval($_POST['precio']);
         
-        if ($id > 0) {
-            // ACTUALIZAR
-            $stmt = $conn->prepare("UPDATE producto SET nombre = ?, stock = ?, precio = ? WHERE id_producto = ?");
-            $stmt->bind_param("sidi", $nombre, $stock, $precio, $id);
-            $stmt->execute();
-            $mensaje = "Producto actualizado correctamente";
+        
+        // VERIFICAR DUPLICADOS
+        $stmt_check = $conn->prepare("SELECT id_producto FROM producto WHERE nombre = ? AND id_producto != ?");
+        $stmt_check->bind_param("si", $nombre, $id);
+        $stmt_check->execute();
+        if ($stmt_check->get_result()->num_rows > 0) {
+            $mensaje = "Error: Ya existe un producto con el nombre '$nombre'.";
+            $tipo_mensaje = "error";
+            $stmt_check->close();
         } else {
-            // CREAR
-            $stmt = $conn->prepare("INSERT INTO producto (nombre, stock, precio) VALUES (?, ?, ?)");
-            $stmt->bind_param("sid", $nombre, $stock, $precio);
-            $stmt->execute();
-            $mensaje = "Producto registrado correctamente";
+            $stmt_check->close();
+            if ($id > 0) {
+                // ACTUALIZAR
+                $stmt = $conn->prepare("UPDATE producto SET nombre = ?, stock = ?, precio = ? WHERE id_producto = ?");
+                $stmt->bind_param("sidi", $nombre, $stock, $precio, $id);
+                $stmt->execute();
+                $mensaje = "Producto actualizado correctamente";
+            } else {
+                // CREAR
+                $stmt = $conn->prepare("INSERT INTO producto (nombre, stock, precio) VALUES (?, ?, ?)");
+                $stmt->bind_param("sid", $nombre, $stock, $precio);
+                $stmt->execute();
+                $mensaje = "Producto registrado correctamente";
+            }
         }
         
         $tipo_mensaje = "success";
@@ -113,13 +126,36 @@ if (isset($_GET['editar'])) {
     $stmt->close();
 }
 
-// CONSULTAR PRODUCTOS CON PAGINACIÓN
+// CONSULTAR PRODUCTOS CON PAGINACIÓN Y BÚSQUEDA
 try {
-    $pagData = getPaginationData($conn, "SELECT COUNT(*) as total FROM producto", 12);
+    $search = isset($_GET['q']) ? trim($_GET['q']) : '';
+    $where_sql = "";
+    if ($search !== '') {
+        $where_sql = " WHERE nombre LIKE '%" . $conn->real_escape_string($search) . "%'";
+    }
+
+    // Obtener los IDs de los últimos 3 productos para la lógica de "NUEVO"
+    $res_top = $conn->query("SELECT id_producto FROM producto ORDER BY id_producto DESC LIMIT 3");
+    $top_ids = [];
+    while($r = $res_top->fetch_assoc()) $top_ids[] = $r['id_producto'];
+    $top_ids_str = !empty($top_ids) ? implode(',', $top_ids) : '0';
+
+    $pagData = getPaginationData($conn, "SELECT COUNT(*) as total FROM producto $where_sql", 12);
     $limit = 12;
     $offset = $pagData['offset'];
     
-    $productos = $conn->query("SELECT * FROM producto ORDER BY nombre LIMIT $limit OFFSET $offset");
+    // Lógica de orden:
+    // 1. Los 3 últimos con menos de 2 minutos van arriba (el más reciente de ellos arriba)
+    // 2. Pasados los 2 minutos o si no son de los 3 últimos, se ordenan alfabéticamente
+    $time_limit = date('Y-m-d H:i:s', strtotime('-2 minutes'));
+    $productos = $conn->query("SELECT *, 
+                               (creado_en > (NOW() - INTERVAL 2 MINUTE) AND id_producto IN ($top_ids_str)) as es_nuevo 
+                               FROM producto 
+                               $where_sql 
+                               ORDER BY es_nuevo DESC, 
+                                        IF(creado_en > (NOW() - INTERVAL 2 MINUTE) AND id_producto IN ($top_ids_str), id_producto, 0) DESC, 
+                                        nombre ASC 
+                               LIMIT $limit OFFSET $offset");
     
     // Calcular valor total del inventario
     $valor_inventario = $conn->query("SELECT SUM(stock * precio) as total FROM producto")->fetch_assoc()['total'] ?? 0;
@@ -642,7 +678,22 @@ try {
     
     <!-- Tabla de Productos -->
     <div class="table-section" id="inventario-productos">
-        <h3>Inventario de Productos</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">
+            <h3 style="border:none; margin:0; padding:0;">Inventario de Productos</h3>
+            
+            <form id="searchForm" style="display: flex; gap: 8px;">
+                <input 
+                    type="text" 
+                    id="searchInput"
+                    name="q" 
+                    placeholder="Buscar producto..." 
+                    value="<?php echo htmlspecialchars($search); ?>"
+                    autocomplete="off"
+                    style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 200px;"
+                >
+                <button type="submit" class="btn btn-primary" style="padding: 8px 15px; font-size: 13px;">🔍</button>
+            </form>
+        </div>
         
         <?php if($productos && $productos->num_rows > 0): ?>
         <table>
@@ -657,8 +708,13 @@ try {
             </thead>
             <tbody>
                 <?php while($row = $productos->fetch_assoc()): ?>
-                <tr>
-                    <td><?php echo htmlspecialchars($row['nombre']); ?></td>
+                <tr <?php echo ($row['es_nuevo']) ? 'style="background: #f0f4ff; border-left: 4px solid #667eea;"' : ''; ?>>
+                    <td>
+                        <?php echo htmlspecialchars($row['nombre']); ?>
+                        <?php if ($row['es_nuevo']): ?>
+                            <span style="font-size: 10px; background: #667eea; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; font-weight: 700;">NUEVO</span>
+                        <?php endif; ?>
+                    </td>
                     <td>
                         <?php 
                         $stock = $row['stock'];
@@ -695,7 +751,7 @@ try {
             </tbody>
         </table>
         
-        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], '', 'p', '#inventario-productos'); ?>
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], "q=" . urlencode($search), 'p', '#inventario-productos'); ?>
         
         <?php else: ?>
         <div class="empty-state">
@@ -780,5 +836,43 @@ window.onclick = function(event) {
 </div> <!-- .dashboard-layout -->
 
 <?php include 'inc/ui.php'; ?>
+<script>
+    // Búsqueda automática con debounce (500ms)
+    let searchTimeout;
+    const searchInput = document.getElementById('searchInput');
+    const searchForm = document.getElementById('searchForm');
+
+    if (searchInput && searchForm) {
+        searchInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            
+            // Filtrado inmediato
+            const term = this.value.toLowerCase().trim();
+            const rows = document.querySelectorAll('table tbody tr');
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(term) ? '' : 'none';
+            });
+
+            // Búsqueda global en el servidor
+            searchTimeout = setTimeout(() => {
+                const currentQ = "<?php echo addslashes($search); ?>";
+                if (this.value.trim() !== currentQ) {
+                    searchForm.submit();
+                }
+            }, 600);
+        });
+
+        // Mantener el foco
+        window.addEventListener('load', () => {
+            if (searchInput.value !== "") {
+                searchInput.focus();
+                const val = searchInput.value;
+                searchInput.value = '';
+                searchInput.value = val;
+            }
+        });
+    }
+</script>
 </body>
 </html>

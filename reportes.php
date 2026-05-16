@@ -1,6 +1,7 @@
 <?php
 require_once("auth.php");
 require_once("conexion.php");
+require_once("inc/pagination_helper.php");
 
 if (!esAdmin() && !esBarbero()) {
     die("<h1>Acceso Denegado</h1><a href='dashboard.php'>Volver</a>");
@@ -35,11 +36,13 @@ switch ($periodo) {
         break;
 }
 
+$where_sql = " AND fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'";
+
 /* ============================================================
    KPIs PRINCIPALES (Solo ventas activas)
    ============================================================ */
-$ingr_ventas  = (float)($conn->query("SELECT SUM(total) t FROM venta WHERE estado='Activa' AND fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
-$num_ventas   = (int)($conn->query("SELECT COUNT(*) t FROM venta WHERE estado='Activa' AND fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
+$ingr_ventas  = (float)($conn->query("SELECT SUM(total) t FROM venta WHERE estado='Activa' $where_sql")->fetch_assoc()['t'] ?? 0);
+$num_ventas   = (int)($conn->query("SELECT COUNT(*) t FROM venta WHERE estado='Activa' $where_sql")->fetch_assoc()['t'] ?? 0);
 $num_citas    = (int)($conn->query("SELECT COUNT(*) t FROM cita WHERE estado='Completada' AND fecha BETWEEN '$desde' AND '$hasta'")->fetch_assoc()['t'] ?? 0);
 $ingr_citas   = (float)($conn->query("SELECT SUM(total_general) t FROM cita WHERE estado='Completada' AND fecha BETWEEN '$desde' AND '$hasta'")->fetch_assoc()['t'] ?? 0);
 $total_ingr   = $ingr_ventas + $ingr_citas;
@@ -47,8 +50,8 @@ $ticket_prom  = ($num_ventas + $num_citas) > 0 ? $total_ingr / ($num_ventas + $n
 $total_clientes = (int)($conn->query("SELECT COUNT(*) t FROM cliente")->fetch_assoc()['t'] ?? 0);
 
 // KPIs de Cancelaciones
-$num_canceladas = (int)($conn->query("SELECT COUNT(*) t FROM venta WHERE estado='Cancelada' AND fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
-$monto_cancelado = (float)($conn->query("SELECT SUM(total) t FROM venta WHERE estado='Cancelada' AND fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
+$num_canceladas = (int)($conn->query("SELECT COUNT(*) t FROM venta WHERE estado='Cancelada' $where_sql")->fetch_assoc()['t'] ?? 0);
+$monto_cancelado = (float)($conn->query("SELECT SUM(total) t FROM venta WHERE estado='Cancelada' $where_sql")->fetch_assoc()['t'] ?? 0);
 
 /* ============================================================
    GRÁFICA 1 – Ingresos por mes (últimos 12 meses)
@@ -90,7 +93,7 @@ while ($r = $top_servicios->fetch_assoc()) {
    ============================================================ */
 $pago_res = $conn->query("
     SELECT metodo_pago, COUNT(*) AS cant, SUM(total) AS total
-    FROM venta WHERE estado='Activa' AND fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'
+    FROM venta WHERE estado='Activa' $where_sql
     GROUP BY metodo_pago
 ");
 $pago_labels = [];
@@ -101,41 +104,100 @@ while ($r = $pago_res->fetch_assoc()) {
 }
 
 /* ============================================================
-   TABLA – Top productos vendidos
+   TABLA – Top productos vendidos (Paginado)
    ============================================================ */
+$pag_prod = getPaginationData($conn, "SELECT COUNT(DISTINCT vd.id_producto) as total 
+                                     FROM venta_detalle vd
+                                     JOIN venta v ON vd.id_venta = v.id_venta
+                                     WHERE v.estado = 'Activa' $where_sql", 10, 'p_prod');
 $top_productos = $conn->query("
     SELECT p.nombre, SUM(vd.cantidad) AS total_cant, SUM(vd.subtotal) AS total_ing
     FROM venta_detalle vd
     JOIN producto p ON vd.id_producto = p.id_producto
     JOIN venta v ON vd.id_venta = v.id_venta
-    WHERE v.estado='Activa' AND v.fecha_venta >= '$desde 00:00:00' AND v.fecha_venta <= '$hasta 23:59:59'
-    GROUP BY vd.id_producto ORDER BY total_cant DESC LIMIT 10
+    WHERE v.estado='Activa' $where_sql
+    GROUP BY vd.id_producto ORDER BY total_cant DESC LIMIT 10 OFFSET {$pag_prod['offset']}
 ");
 
 /* ============================================================
-   TABLA – Últimas citas completadas
+   TABLA – Últimas citas completadas (Paginado)
    ============================================================ */
+$pag_citas = getPaginationData($conn, "SELECT COUNT(*) as total FROM cita WHERE estado = 'Completada' AND fecha BETWEEN '$desde' AND '$hasta'", 10, 'p_citas');
 $ult_citas = $conn->query("
     SELECT c.id_cita, c.fecha, c.hora, c.total_general, c.metodo_pago,
            cl.nombre AS cliente
     FROM cita c
     LEFT JOIN cliente cl ON c.id_cliente = cl.id_cliente
     WHERE c.estado='Completada' AND c.fecha BETWEEN '$desde' AND '$hasta'
-    ORDER BY c.fecha DESC, c.hora DESC LIMIT 8
+    ORDER BY c.fecha DESC, c.hora DESC LIMIT 10 OFFSET {$pag_citas['offset']}
 ");
 
-/* ============================================================
-   TABLA – Ventas Canceladas
-   ============================================================ */
+$pag_cancel = getPaginationData($conn, "SELECT COUNT(*) as total FROM venta WHERE estado = 'Cancelada' $where_sql", 10, 'p_cancel');
 $ventas_canceladas = $conn->query("
     SELECT v.id_venta, v.fecha_venta, v.total, v.motivo_cancelacion, 
            c.nombre AS cliente, u.nombre_usuario AS vendedor
     FROM venta v
     LEFT JOIN cliente c ON v.id_cliente = c.id_cliente
     LEFT JOIN usuario u ON v.id_usuario = u.id_usuario
-    WHERE v.estado='Cancelada' AND v.fecha_venta >= '$desde 00:00:00' AND v.fecha_venta <= '$hasta 23:59:59'
-    ORDER BY v.fecha_venta DESC LIMIT 10
+    WHERE v.estado='Cancelada' $where_sql
+    ORDER BY v.fecha_venta DESC LIMIT 10 OFFSET {$pag_cancel['offset']}
 ");
+
+/* ============================================================
+   REPORTE DETALLADO (Citas y Productos)
+   ============================================================ */
+$det_tipo    = $_GET['det_tipo']    ?? 'ambos';
+$det_periodo = $_GET['det_periodo'] ?? 'semana';
+$det_fecha   = $_GET['det_fecha']   ?? date('Y-m-d'); 
+
+if ($det_periodo == 'semana') {
+    $ts = strtotime($det_fecha);
+    $dia_semana = date('w', $ts);
+    $lunes_ts = ($dia_semana == 1) ? $ts : strtotime('last monday', $ts);
+    $det_desde = date('Y-m-d', $lunes_ts);
+    $det_hasta = date('Y-m-d', strtotime('next sunday', $lunes_ts));
+} else {
+    $ts = strtotime($det_fecha);
+    $det_desde = date('Y-m-01', $ts);
+    $det_hasta = date('Y-m-t', $ts);
+}
+
+$det_data_all = [];
+
+if ($det_tipo == 'citas' || $det_tipo == 'ambos') {
+    $res_citas = $conn->query("SELECT 'Cita' as tipo, c.fecha as fecha_ref, c.hora, cl.nombre as cliente, c.total_general as monto, 'Servicio(s)' as detalle FROM cita c LEFT JOIN cliente cl ON c.id_cliente = cl.id_cliente WHERE c.estado='Completada' AND c.fecha BETWEEN '$det_desde' AND '$det_hasta'");
+    while($r = $res_citas->fetch_assoc()) $det_data_all[] = $r;
+}
+
+if ($det_tipo == 'productos' || $det_tipo == 'ambos') {
+    $res_prod = $conn->query("
+        SELECT 'Producto' as tipo, v.fecha_venta as fecha_ref, '' as hora, cl.nombre as cliente, vd.subtotal as monto, p.nombre as detalle
+        FROM venta_detalle vd
+        JOIN venta v ON vd.id_venta = v.id_venta
+        JOIN producto p ON vd.id_producto = p.id_producto
+        LEFT JOIN cliente cl ON v.id_cliente = cl.id_cliente
+        WHERE v.estado='Activa' AND v.fecha_venta >= '$det_desde 00:00:00' AND v.fecha_venta <= '$det_hasta 23:59:59'
+    ");
+    while($r = $res_prod->fetch_assoc()) $det_data_all[] = $r;
+}
+
+// Ordenar por fecha y luego por hora
+usort($det_data_all, function($a, $b) {
+    $cmp = strcmp($a['fecha_ref'], $b['fecha_ref']);
+    if ($cmp === 0) return strcmp($a['hora'], $b['hora']);
+    return $cmp;
+});
+
+// Paginación para reporte detallado (Ahora que ya tenemos todos los datos ordenados)
+$total_det_records = count($det_data_all);
+$limit_det = 10;
+$pag_det_current = isset($_GET['p_det']) ? max(1, intval($_GET['p_det'])) : 1;
+$total_det_pages = ceil($total_det_records / $limit_det);
+$offset_det = ($pag_det_current - 1) * $limit_det;
+$det_data = array_slice($det_data_all, $offset_det, $limit_det);
+
+$total_monto = 0;
+foreach($det_data_all as $r) $total_monto += (float)$r['monto'];
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -378,6 +440,54 @@ $ventas_canceladas = $conn->query("
         .badge-Transferencia{ background: #ede9fe; color: #5b21b6; }
 
         .empty-state { text-align: center; padding: 40px; color: #bbb; font-size: 14px; }
+
+        /* Estilos nuevos para filtros detallados */
+        .det-filters {
+            display: flex; gap: 15px; align-items: center; padding: 15px 20px;
+            background: #f8f9ff; border-bottom: 1px solid #e0e0e0; flex-wrap: wrap;
+        }
+        .det-filters select, .det-filters input {
+            padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;
+        }
+        .btn-pdf {
+            background: #ef4444; color: white; padding: 8px 15px; border-radius: 8px;
+            text-decoration: none; font-size: 13px; font-weight: 600; transition: 0.2s;
+            display: inline-flex; align-items: center; gap: 5px;
+        }
+        .btn-pdf:hover { background: #dc2626; transform: scale(1.02); }
+
+        <?= getPaginationStyles() ?>
+
+        /* ============ MODAL ============ */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.55);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.2s;
+            padding: 20px;
+        }
+        .modal-overlay.active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .modal {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            width: 100%;
+            max-width: 580px;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: slideUp 0.3s ease;
+        }
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to   { transform: translateY(0);    opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -507,6 +617,7 @@ $ventas_canceladas = $conn->query("
             <?php else: ?>
             <div class="empty-state">Sin ventas de productos en el período.</div>
             <?php endif; ?>
+            <?= renderPagination($pag_prod['current_page'], $pag_prod['total_pages'], $_SERVER['QUERY_STRING'] ?? '', 'p_prod', '#top_prod') ?>
         </div>
 
         <!-- Últimas citas completadas -->
@@ -535,7 +646,8 @@ $ventas_canceladas = $conn->query("
             <?php else: ?>
             <div class="empty-state">Sin citas completadas en el período.</div>
             <?php endif; ?>
-    </div>
+            <?= renderPagination($pag_citas['current_page'], $pag_citas['total_pages'], $_SERVER['QUERY_STRING'] ?? '', 'p_citas', '#ult_citas') ?>
+        </div>
 
     <!-- ===== TABLA CANCELACIONES ===== -->
     <div class="table-card" style="margin-top: 20px;">
@@ -566,11 +678,120 @@ $ventas_canceladas = $conn->query("
         <?php else: ?>
         <div class="empty-state">No se registraron cancelaciones en este período.</div>
         <?php endif; ?>
+        <?= renderPagination($pag_cancel['current_page'], $pag_cancel['total_pages'], $_SERVER['QUERY_STRING'] ?? '', 'p_cancel', '#ventas_cancel') ?>
+    </div>
+
+    <!-- ===== REPORTE DETALLADO ===== -->
+    <div class="table-card" style="margin-top: 30px;" id="seccion-detallada">
+        <div class="table-header" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>📋 Reporte Detallado de Operaciones</span>
+            <button type="button" class="btn-pdf" onclick="abrirModalReporte()">
+                📄 Generar PDF
+            </button>
+        </div>
+        
+        <form method="GET" action="#seccion-detallada" class="det-filters">
+            <!-- Mantener filtros globales -->
+            <input type="hidden" name="periodo" value="<?= $periodo ?>">
+            <input type="hidden" name="desde" value="<?= $_GET['desde'] ?? '' ?>">
+            <input type="hidden" name="hasta" value="<?= $_GET['hasta'] ?? '' ?>">
+
+            <div>
+                <label style="font-size:12px; font-weight:600; display:block; margin-bottom:3px;">Ver:</label>
+                <select name="det_tipo">
+                    <option value="ambos" <?= $det_tipo=='ambos'?'selected':'' ?>>Citas y Productos</option>
+                    <option value="citas" <?= $det_tipo=='citas'?'selected':'' ?>>Solo Citas</option>
+                    <option value="productos" <?= $det_tipo=='productos'?'selected':'' ?>>Solo Productos</option>
+                </select>
+            </div>
+
+            <div>
+                <label style="font-size:12px; font-weight:600; display:block; margin-bottom:3px;">Frecuencia:</label>
+                <select name="det_periodo">
+                    <option value="semana" <?= $det_periodo=='semana'?'selected':'' ?>>Semana</option>
+                    <option value="mes" <?= $det_periodo=='mes'?'selected':'' ?>>Mes</option>
+                </select>
+            </div>
+
+            <div>
+                <label style="font-size:12px; font-weight:600; display:block; margin-bottom:3px;">Fecha Ref:</label>
+                <input type="date" name="det_fecha" value="<?= $det_fecha ?>">
+            </div>
+
+            <div style="align-self: flex-end;">
+                <button type="submit" class="btn-aplicar" style="padding: 7px 15px;">🔍 Filtrar</button>
+            </div>
+
+            <div style="margin-left: auto; text-align: right; font-size: 12px; color: #666;">
+                Mostrando: <strong><?= date('d/m/Y', strtotime($det_desde)) ?></strong> al <strong><?= date('d/m/Y', strtotime($det_hasta)) ?></strong>
+            </div>
+        </form>
+
+        <?php if (!empty($det_data)): ?>
+        <table class="rep">
+            <thead>
+                <tr>
+                    <th>Fecha / Hora</th>
+                    <th>Tipo</th>
+                    <th>Concepto</th>
+                    <th>Cliente</th>
+                    <th>Monto</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($det_data as $item): ?>
+            <tr>
+                <td>
+                    <?= date('d/m/Y', strtotime($item['fecha_ref'])) ?> 
+                    <span style="color:#888;"><?= $item['hora'] ? substr($item['hora'],0,5) : '' ?></span>
+                </td>
+                <td>
+                    <span style="padding:2px 8px; border-radius:10px; font-size:10px; font-weight:700; color:white; background: <?= $item['tipo']=='Cita'?'#667eea':'#10b981' ?>;">
+                        <?= $item['tipo'] ?>
+                    </span>
+                </td>
+                <td><?= htmlspecialchars($item['detalle']) ?></td>
+                <td><?= htmlspecialchars($item['cliente'] ?? 'Venta Mostrador') ?></td>
+                <td style="font-weight:700;">$<?= number_format($item['monto'], 2) ?></td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php else: ?>
+        <div class="empty-state">No se encontraron registros para los filtros seleccionados.</div>
+        <?php endif; ?>
+        <?= renderPagination($pag_det_current, $total_det_pages, $_SERVER['QUERY_STRING'] ?? '', 'p_det', '#seccion-detallada') ?>
     </div>
 
 </div><!-- /container -->
 
+<!-- Modal Reporte -->
+<div id="modalReporte" class="modal-overlay">
+    <div class="modal" style="max-width: 1100px; width: 95%; background: #525659; border: none;">
+        <div class="modal-body" style="padding: 0; height: 90vh; background: #525659; border-radius: 16px; overflow: hidden;">
+            <iframe id="frameReporte" src="" style="width: 100%; height: 100%; border: none; display: block;"></iframe>
+        </div>
+    </div>
+</div>
+
 <script>
+function abrirModalReporte() {
+    const tipo = document.querySelector('[name="det_tipo"]').value;
+    const periodo = document.querySelector('[name="det_periodo"]').value;
+    const fecha = document.querySelector('[name="det_fecha"]').value;
+    
+    const url = `reporte_imprimible.php?det_tipo=${tipo}&det_periodo=${periodo}&det_fecha=${fecha}`;
+    document.getElementById('frameReporte').src = url;
+    document.getElementById('modalReporte').classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
+
+function cerrarModalReporte() {
+    document.getElementById('modalReporte').classList.remove('active');
+    document.getElementById('frameReporte').src = "";
+    document.body.style.overflow = 'auto';
+}
+
 /* ===== PALETA ===== */
 const PURPLE = 'rgba(102,126,234,1)';
 const PURPLE_L = 'rgba(102,126,234,0.15)';

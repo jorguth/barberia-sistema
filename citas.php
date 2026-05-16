@@ -1225,7 +1225,17 @@ for ($h = 8; $h <= 20; $h++) {
                 </div>
 
                 <div class="form-group" style="margin-bottom: 16px;">
-                    <label>Servicios</label>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label style="margin-bottom: 0;">Servicios</label>
+                        <input 
+                            type="text" 
+                            id="searchSrvModal" 
+                            placeholder="🔍 Buscar servicio..." 
+                            style="padding: 6px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 13px; width: 180px; outline: none; transition: border-color 0.2s;"
+                            onfocus="this.style.borderColor='#667eea'"
+                            onblur="this.style.borderColor='#e0e0e0'"
+                        >
+                    </div>
                     <div class="servicios-grid">
                         <?php
                         if ($servicios_list && $servicios_list->num_rows > 0) {
@@ -1346,6 +1356,12 @@ function abrirModalNueva(fecha = '', hora = '', id_cita = 0) {
     document.getElementById('id_cliente').value = '';
     document.getElementById('observaciones').value = '';
     
+    // Limpiar filtro de servicios si existe
+    const searchSrv = document.getElementById('searchSrvModal');
+    if (searchSrv) {
+        searchSrv.value = '';
+    }
+    
     // Desmarcar todos los servicios
     document.querySelectorAll('input[name="servicios[]"]').forEach(cb => {
         cb.checked = false;
@@ -1417,17 +1433,30 @@ function toggleSrvLabel(cb) {
     if (lbl) lbl.classList.toggle('checked', cb.checked);
 }
 
-/* PAGINACIÓN DE SERVICIOS EN EL MODAL */
+/* PAGINACIÓN Y FILTRADO DE SERVICIOS EN EL MODAL */
 let currentSrvPage = 1;
 const srvPerPage = 6;
 
 function initSrvPagination() {
-    const services = document.querySelectorAll('.srv-checkbox');
-    const totalPages = Math.ceil(services.length / srvPerPage);
+    const term = document.getElementById('searchSrvModal') ? document.getElementById('searchSrvModal').value.toLowerCase().trim() : '';
+    const services = Array.from(document.querySelectorAll('.srv-checkbox'));
+    
+    // Filter services based on search term
+    const visibleServices = services.filter(srv => {
+        const nombre = srv.querySelector('.srv-nombre').textContent.toLowerCase();
+        if (nombre.includes(term)) {
+            return true;
+        } else {
+            srv.style.display = 'none';
+            return false;
+        }
+    });
+
+    const totalPages = Math.ceil(visibleServices.length / srvPerPage);
     
     if (totalPages <= 1) {
         document.getElementById('srvPaginationControls').style.display = 'none';
-        services.forEach(s => s.style.display = 'flex');
+        visibleServices.forEach(s => s.style.display = 'flex');
         return;
     }
 
@@ -1436,21 +1465,31 @@ function initSrvPagination() {
 }
 
 function showSrvPage(page) {
-    const services = document.querySelectorAll('.srv-checkbox');
-    const totalPages = Math.ceil(services.length / srvPerPage);
+    const term = document.getElementById('searchSrvModal') ? document.getElementById('searchSrvModal').value.toLowerCase().trim() : '';
+    const services = Array.from(document.querySelectorAll('.srv-checkbox'));
+    
+    // Filter services based on search term
+    const visibleServices = services.filter(srv => {
+        const nombre = srv.querySelector('.srv-nombre').textContent.toLowerCase();
+        return nombre.includes(term);
+    });
+
+    const totalPages = Math.ceil(visibleServices.length / srvPerPage) || 1;
     
     if (page < 1) page = 1;
     if (page > totalPages) page = totalPages;
     
     currentSrvPage = page;
     
-    services.forEach((srv, index) => {
+    // Hide all first
+    services.forEach(s => s.style.display = 'none');
+    
+    // Show only the ones on the current page
+    visibleServices.forEach((srv, index) => {
         const start = (page - 1) * srvPerPage;
         const end = start + srvPerPage;
         if (index >= start && index < end) {
             srv.style.display = 'flex';
-        } else {
-            srv.style.display = 'none';
         }
     });
     
@@ -1462,6 +1501,14 @@ function showSrvPage(page) {
 function changeSrvPage(delta) {
     showSrvPage(currentSrvPage + delta);
 }
+
+// Attach event listener when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    const searchSrv = document.getElementById('searchSrvModal');
+    if (searchSrv) {
+        searchSrv.addEventListener('input', initSrvPagination);
+    }
+});
 
 function verCita(id) {
     const c = CITAS_DATA[id];
