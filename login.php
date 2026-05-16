@@ -236,7 +236,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['login'])) {
     <div class="divider">○ ○ ○</div>
     
     <div class="register-link">
-        ¿No tienes cuenta? <a href="registro.php">Regístrate aquí</a>
+        ¿Olvidaste tu contraseña? <a href="recuperar.php">Recupérala aquí</a>
     </div>
 </div>
 

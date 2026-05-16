@@ -17,10 +17,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['nueva_venta'])) {
     try {
         $id_cliente  = !empty($_POST['id_cliente'])  ? intval($_POST['id_cliente'])  : null;
         $metodo_pago = $_POST['metodo_pago'] ?? 'Efectivo';
-        $descuento   = floatval($_POST['descuento'] ?? 0);
+        $porc_descuento = floatval($_POST['descuento'] ?? 0);
         $notas       = trim($_POST['notas'] ?? '');
         $productos   = $_POST['productos']   ?? [];
         $cantidades  = $_POST['cantidades']  ?? [];
+
+        if ($porc_descuento < 0 || $porc_descuento > 50) {
+            throw new Exception("El descuento no puede ser mayor al 50%.");
+        }
 
         if (empty($productos)) throw new Exception("Debes agregar al menos un producto.");
 
@@ -55,12 +59,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['nueva_venta'])) {
 
         if (empty($items)) throw new Exception("Sin ítems válidos.");
 
-        $total       = max(0, $subtotal - $descuento);
-        $id_usuario  = $_SESSION['id_usuario'];
+        $monto_descuento = $subtotal * ($porc_descuento / 100);
+        $total           = max(0, $subtotal - $monto_descuento);
+        $id_usuario      = $_SESSION['id_usuario'];
 
         // Insertar venta
         $st = $conn->prepare("INSERT INTO venta (id_cliente, id_usuario, subtotal, descuento, total, metodo_pago, notas) VALUES (?,?,?,?,?,?,?)");
-        $st->bind_param("iidddss", $id_cliente, $id_usuario, $subtotal, $descuento, $total, $metodo_pago, $notas);
+        $st->bind_param("iidddss", $id_cliente, $id_usuario, $subtotal, $monto_descuento, $total, $metodo_pago, $notas);
         $st->execute();
         $id_venta = $conn->insert_id;
         $st->close();
@@ -583,7 +588,7 @@ $total_periodo = $conn->query("
                             <span id="disp-subtotal">$0.00</span>
                         </div>
                         <div class="totales-row">
-                            <span>Descuento ($)</span>
+                            <span>Descuento aplicado</span>
                             <span id="disp-descuento">$0.00</span>
                         </div>
                         <div class="totales-row total-final">
@@ -593,8 +598,20 @@ $total_periodo = $conn->query("
                     </div>
 
                     <div class="form-group">
-                        <label>Descuento ($)</label>
-                        <input type="number" name="descuento" id="inp-descuento" min="0" step="0.01" value="0" oninput="recalcular()">
+                        <label>Descuento (%)</label>
+                        <select name="descuento" id="inp-descuento" onchange="recalcular()">
+                            <option value="0">0% (Sin descuento)</option>
+                            <option value="5">5%</option>
+                            <option value="10">10%</option>
+                            <option value="15">15%</option>
+                            <option value="20">20%</option>
+                            <option value="25">25%</option>
+                            <option value="30">30%</option>
+                            <option value="35">35%</option>
+                            <option value="40">40%</option>
+                            <option value="45">45%</option>
+                            <option value="50">50% (Máximo)</option>
+                        </select>
                     </div>
 
                     <div class="form-group">
@@ -783,6 +800,19 @@ function buildProdOptions(selectedId = 0) {
 }
 
 function agregarFila(prodId = 0, cant = 1) {
+    // Verificar que no haya filas vacías antes de agregar otra
+    const selects = document.querySelectorAll('select[name="productos[]"]');
+    let hasEmpty = false;
+    selects.forEach(sel => {
+        if (!sel.value) hasEmpty = true;
+    });
+    if (hasEmpty && document.getElementById('items-body').children.length > 0) {
+        if (typeof mostrarNotificacion === 'function') {
+            mostrarNotificacion('warning', 'Selecciona un producto en la fila vacía primero');
+        }
+        return;
+    }
+
     const tbody = document.getElementById('items-body');
     const id    = rowCount++;
     const tr    = document.createElement('tr');
@@ -801,6 +831,29 @@ function agregarFila(prodId = 0, cant = 1) {
     tbody.appendChild(tr);
     if (prodId) { onProdChange(id); }
     recalcular();
+    actualizarBotonAgregar();
+}
+
+function actualizarBotonAgregar() {
+    const btn = document.querySelector('.btn-add-row');
+    if (!btn) return;
+    const selects = document.querySelectorAll('select[name="productos[]"]');
+    let hasEmpty = false;
+    selects.forEach(sel => {
+        if (!sel.value) hasEmpty = true;
+    });
+    
+    if (hasEmpty) {
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+        btn.title = 'Selecciona un producto primero';
+    } else {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+        btn.title = 'Agregar producto';
+    }
 }
 
 function onProdChange(id) {
@@ -809,11 +862,13 @@ function onProdChange(id) {
     const prec = parseFloat(opt?.dataset?.precio || 0);
     document.getElementById(`precio-${id}`).textContent = `$${prec.toFixed(2)}`;
     recalcular();
+    actualizarBotonAgregar();
 }
 
 function quitarFila(id) {
     document.getElementById(`row-${id}`)?.remove();
     recalcular();
+    actualizarBotonAgregar();
 }
 
 function recalcular() {
@@ -830,10 +885,24 @@ function recalcular() {
         sub += itemSub;
         if (subEl) subEl.textContent = `$${itemSub.toFixed(2)}`;
     });
-    const desc  = parseFloat(document.getElementById('inp-descuento')?.value || 0);
-    const total = Math.max(0, sub - desc);
+
+    let porcDesc = parseFloat(document.getElementById('inp-descuento')?.value || 0);
+    
+    // Limitar a 50%
+    if (porcDesc > 50) {
+        porcDesc = 50;
+        document.getElementById('inp-descuento').value = 50;
+    }
+    if (porcDesc < 0) {
+        porcDesc = 0;
+        document.getElementById('inp-descuento').value = 0;
+    }
+
+    const montoDesc = sub * (porcDesc / 100);
+    const total = Math.max(0, sub - montoDesc);
+
     document.getElementById('disp-subtotal').textContent  = `$${sub.toFixed(2)}`;
-    document.getElementById('disp-descuento').textContent = `$${desc.toFixed(2)}`;
+    document.getElementById('disp-descuento').textContent = `$${montoDesc.toFixed(2)}`;
     document.getElementById('disp-total').textContent     = `$${total.toFixed(2)}`;
 }
 

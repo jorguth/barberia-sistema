@@ -110,6 +110,150 @@ if ($_SESSION['id_rol'] == 3) {
         $datos_cliente = null;
     }
 }
+
+// NUEVA PREGUNTA DE SEGURIDAD (Solo Admin)
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['crear_pregunta']) && esAdmin()) {
+    try {
+        $nueva = trim($_POST['nueva_pregunta_texto']);
+        if (!empty($nueva)) {
+            $stmt = $conn->prepare("INSERT INTO pregunta_seguridad (pregunta) VALUES (?)");
+            $stmt->bind_param("s", $nueva);
+            $stmt->execute();
+            $stmt->close();
+            $mensaje = "Nueva pregunta añadida al catálogo.";
+            $tipo_mensaje = "success";
+        }
+    } catch (Exception $e) {
+        $mensaje = "Error: " . $e->getMessage();
+        $tipo_mensaje = "error";
+    }
+}
+
+// EDITAR PREGUNTA DE SEGURIDAD (Solo Admin)
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['editar_pregunta_catalogo']) && esAdmin()) {
+    try {
+        $id_editar = intval($_POST['id_pregunta']);
+        $texto_editado = trim($_POST['pregunta_editada']);
+        if (!empty($texto_editado)) {
+            $stmt = $conn->prepare("UPDATE pregunta_seguridad SET pregunta = ? WHERE id_pregunta = ?");
+            $stmt->bind_param("si", $texto_editado, $id_editar);
+            $stmt->execute();
+            $mensaje = "Pregunta actualizada correctamente.";
+            $tipo_mensaje = "success";
+        }
+    } catch (Exception $e) {
+        $mensaje = "Error al editar pregunta: " . $e->getMessage();
+        $tipo_mensaje = "error";
+    }
+}
+
+// ELIMINAR PREGUNTA DE SEGURIDAD (Solo Admin)
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['eliminar_pregunta_catalogo']) && esAdmin()) {
+    try {
+        $id_eliminar = intval($_POST['id_pregunta']);
+        $conn->begin_transaction();
+        
+        $stmt = $conn->prepare("DELETE FROM usuario_pregunta WHERE id_pregunta = ?");
+        $stmt->bind_param("i", $id_eliminar);
+        $stmt->execute();
+        
+        $stmt = $conn->prepare("DELETE FROM pregunta_seguridad WHERE id_pregunta = ?");
+        $stmt->bind_param("i", $id_eliminar);
+        $stmt->execute();
+        
+        $conn->commit();
+        $mensaje = "Pregunta eliminada del catálogo correctamente.";
+        $tipo_mensaje = "success";
+    } catch (Exception $e) {
+        if ($conn->in_transaction) $conn->rollback();
+        $mensaje = "Error al eliminar pregunta: " . $e->getMessage();
+        $tipo_mensaje = "error";
+    }
+}
+
+
+// GUARDAR PREGUNTAS DE SEGURIDAD
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar_preguntas'])) {
+    try {
+        $preguntas_enviadas = $_POST['pregunta'] ?? [];
+        $respuestas_enviadas = $_POST['respuesta'] ?? [];
+        
+        $cantidad = count($preguntas_enviadas);
+        
+        if ($cantidad > 4) {
+            $mensaje = "Debes configurar un máximo de 4 preguntas.";
+            $tipo_mensaje = "error";
+        } else if ($cantidad > 0) {
+            $preguntas_unicas = array_unique($preguntas_enviadas);
+            if (count($preguntas_unicas) !== $cantidad) {
+                $mensaje = "No puedes seleccionar la misma pregunta varias veces.";
+                $tipo_mensaje = "error";
+            } else {
+                $todas_respondidas = true;
+                foreach($respuestas_enviadas as $r) {
+                    if (empty(trim($r))) $todas_respondidas = false;
+                }
+                
+                if (!$todas_respondidas) {
+                    $mensaje = "Debes responder a todas las preguntas seleccionadas.";
+                    $tipo_mensaje = "error";
+                } else {
+                    $conn->begin_transaction();
+                    
+                    $stmt = $conn->prepare("DELETE FROM usuario_pregunta WHERE id_usuario = ?");
+                    $stmt->bind_param("i", $_SESSION['id_usuario']);
+                    $stmt->execute();
+                    
+                    $stmt = $conn->prepare("INSERT INTO usuario_pregunta (id_usuario, id_pregunta, respuesta) VALUES (?, ?, ?)");
+                    for ($i = 0; $i < $cantidad; $i++) {
+                        $p_id = intval($preguntas_enviadas[$i]);
+                        $r_text = strtolower(trim($respuestas_enviadas[$i]));
+                        $stmt->bind_param("iis", $_SESSION['id_usuario'], $p_id, $r_text);
+                        $stmt->execute();
+                    }
+                    
+                    $conn->commit();
+                    $mensaje = "Preguntas de seguridad configuradas correctamente.";
+                    $tipo_mensaje = "success";
+                }
+            }
+        } else {
+            // Si la cantidad es 0, solo eliminamos las preguntas
+            $stmt = $conn->prepare("DELETE FROM usuario_pregunta WHERE id_usuario = ?");
+            $stmt->bind_param("i", $_SESSION['id_usuario']);
+            $stmt->execute();
+            $mensaje = "Se han eliminado tus preguntas de seguridad.";
+            $tipo_mensaje = "success";
+        }
+    } catch (Exception $e) {
+        if ($conn->in_transaction) $conn->rollback();
+        $mensaje = "Error al guardar preguntas: " . $e->getMessage();
+        $tipo_mensaje = "error";
+    }
+}
+
+// CARGAR PREGUNTAS DEL CATÁLOGO
+$cat_preguntas = [];
+$res_preguntas = $conn->query("SELECT * FROM pregunta_seguridad ORDER BY id_pregunta");
+if ($res_preguntas) {
+    while ($row = $res_preguntas->fetch_assoc()) {
+        $cat_preguntas[] = $row;
+    }
+}
+
+// CARGAR PREGUNTAS DEL USUARIO
+$mis_preguntas = [];
+$mis_respuestas = [];
+$stmt = $conn->prepare("SELECT id_pregunta, respuesta FROM usuario_pregunta WHERE id_usuario = ?");
+$stmt->bind_param("i", $_SESSION['id_usuario']);
+$stmt->execute();
+$res = $stmt->get_result();
+while ($row = $res->fetch_assoc()) {
+    $mis_preguntas[] = $row['id_pregunta'];
+    $mis_respuestas[] = $row['respuesta'];
+}
+$stmt->close();
+
 ?>
 
 <!DOCTYPE html>
@@ -450,6 +594,195 @@ if ($_SESSION['id_rol'] == 3) {
         </form>
     </div>
     <?php endif; ?>
+    <!-- Formulario de Recuperación de Contraseña -->
+    <div class="form-section">
+        <h3>🔒 Recuperación de Contraseña</h3>
+        <p style="color: #666; font-size: 14px; margin-bottom: 20px;">
+            Configura hasta 4 preguntas de seguridad. Estas te permitirán recuperar el acceso a tu cuenta si olvidas tu contraseña. Puedes eliminarlas todas si no deseas esta opción.
+        </p>
+        
+        <?php if (esAdmin()): ?>
+        <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px dashed #ccc;">
+            <form method="POST">
+                <div class="form-group" style="margin-bottom: 10px;">
+                    <label for="nueva_pregunta_texto">Administrador: Añadir nueva pregunta al catálogo</label>
+                    <div style="display:flex; gap:10px;">
+                        <input type="text" name="nueva_pregunta_texto" placeholder="Ej: ¿Cuál es tu color favorito?" required>
+                        <button type="submit" name="crear_pregunta" class="btn btn-secondary" style="background:#6c757d; color:white; white-space:nowrap;">Añadir Pregunta</button>
+                    </div>
+                </div>
+            </form>
+            
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e0e0e0;">
+                <label style="font-weight: 600; color: #555; display: block; margin-bottom: 10px;">Gestionar Preguntas Existentes:</label>
+                <form method="POST">
+                    <div class="form-group" style="margin-bottom: 10px;">
+                        <select id="select_pregunta_catalogo" style="width:100%; padding:10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px;" onchange="cargarPreguntaAEditar()">
+                            <option value="">-- Selecciona una pregunta para editar o eliminar --</option>
+                            <?php foreach ($cat_preguntas as $p): ?>
+                                <option value="<?php echo $p['id_pregunta']; ?>" data-texto="<?php echo htmlspecialchars($p['pregunta']); ?>">
+                                    <?php echo htmlspecialchars($p['pregunta']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div id="panel_edicion_pregunta" style="display: none; padding: 15px; background: white; border: 1px solid #e0e0e0; border-radius: 5px; margin-top: 10px;">
+                        <input type="hidden" name="id_pregunta" id="id_pregunta_editar">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label style="font-size: 13px; color: #666; margin-bottom: 5px; display: block;">Modificar texto de la pregunta:</label>
+                            <input type="text" name="pregunta_editada" id="texto_pregunta_editar" required style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px;">
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button type="submit" name="editar_pregunta_catalogo" class="btn" style="background:#3b82f6; color:white; padding:8px 15px; font-size:13px; border-radius: 4px; flex: 1;">💾 Guardar Cambios</button>
+                            <button type="submit" name="eliminar_pregunta_catalogo" class="btn" style="background:#ef4444; color:white; padding:8px 15px; font-size:13px; border-radius: 4px; flex: 1;" onclick="return confirm('¿Seguro que deseas eliminar esta pregunta? Usuarios que la tengan configurada la perderán.')">🗑️ Eliminar</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            
+            <script>
+            function cargarPreguntaAEditar() {
+                const select = document.getElementById('select_pregunta_catalogo');
+                const panel = document.getElementById('panel_edicion_pregunta');
+                const idInput = document.getElementById('id_pregunta_editar');
+                const textoInput = document.getElementById('texto_pregunta_editar');
+                
+                if (select.value === "") {
+                    panel.style.display = 'none';
+                    idInput.value = "";
+                    textoInput.value = "";
+                } else {
+                    const option = select.options[select.selectedIndex];
+                    panel.style.display = 'block';
+                    idInput.value = option.value;
+                    textoInput.value = option.getAttribute('data-texto');
+                }
+            }
+            </script>
+        </div>
+        <?php endif; ?>
+
+        <form method="POST" id="form-preguntas">
+            <div id="preguntas-container">
+                <?php 
+                $cantidad_actual = count($mis_preguntas);
+                for ($i = 0; $i < $cantidad_actual; $i++): 
+                ?>
+                <div class="form-row pregunta-row" style="display:flex; gap:15px; margin-bottom: 15px; align-items:flex-end;">
+                    <div class="form-group" style="flex:1; margin-bottom:0;">
+                        <label>Pregunta</label>
+                        <select name="pregunta[]" style="width:100%; padding:12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;" required onchange="actualizarOpcionesDisponibles()">
+                            <option value="">-- Selecciona una pregunta --</option>
+                            <?php foreach ($cat_preguntas as $p): ?>
+                                <option value="<?php echo $p['id_pregunta']; ?>" 
+                                    <?php echo (isset($mis_preguntas[$i]) && $mis_preguntas[$i] == $p['id_pregunta']) ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($p['pregunta']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1; margin-bottom:0;">
+                        <label>Respuesta</label>
+                        <input type="text" name="respuesta[]" placeholder="Tu respuesta" required 
+                               value="<?php echo isset($mis_respuestas[$i]) ? htmlspecialchars($mis_respuestas[$i]) : ''; ?>">
+                    </div>
+                    <button type="button" class="btn btn-eliminar" style="background:#ef4444; color:white; padding:12px; border-radius:8px; border:none; cursor:pointer;" onclick="eliminarFila(this)">🗑️</button>
+                </div>
+                <?php endfor; ?>
+            </div>
+            
+            <div style="display:flex; gap:10px; margin-top: 15px; flex-wrap: wrap;">
+                <button type="button" id="btn-add-pregunta" class="btn" style="background:#f3f4f6; color:#333; border: 1px solid #e0e0e0; flex:1; min-width: 200px;" onclick="agregarPregunta()">
+                    ➕ Añadir otra pregunta (Máx 4)
+                </button>
+                <button type="submit" name="guardar_preguntas" class="btn btn-primary" style="flex:2; min-width: 250px;">
+                    💾 Guardar Preguntas de Seguridad
+                </button>
+            </div>
+        </form>
+
+        <script>
+            const maxPreguntas = 4;
+            const catalogo = <?php echo json_encode($cat_preguntas); ?>;
+            
+            function actualizarOpcionesDisponibles() {
+                const selects = document.querySelectorAll('select[name="pregunta[]"]');
+                const selecciones = Array.from(selects).map(s => s.value).filter(v => v !== "");
+                
+                selects.forEach(select => {
+                    const currentValue = select.value;
+                    Array.from(select.options).forEach(option => {
+                        if (option.value === "") return;
+                        if (selecciones.includes(option.value) && option.value !== currentValue) {
+                            option.disabled = true;
+                            option.style.display = 'none';
+                        } else {
+                            option.disabled = false;
+                            option.style.display = 'block';
+                        }
+                    });
+                });
+            }
+
+            function actualizarBotones() {
+                const rows = document.querySelectorAll('.pregunta-row');
+                const btnAdd = document.getElementById('btn-add-pregunta');
+                const btnsEliminar = document.querySelectorAll('.btn-eliminar');
+                
+                if(rows.length >= maxPreguntas) {
+                    btnAdd.style.display = 'none';
+                } else {
+                    btnAdd.style.display = 'block';
+                }
+                
+                btnsEliminar.forEach(btn => {
+                    btn.style.display = 'block';
+                });
+                
+                actualizarOpcionesDisponibles();
+            }
+
+            function agregarPregunta() {
+                const container = document.getElementById('preguntas-container');
+                const rows = document.querySelectorAll('.pregunta-row');
+                
+                if (rows.length >= maxPreguntas) return;
+                
+                let options = '<option value="">-- Selecciona una pregunta --</option>';
+                catalogo.forEach(p => {
+                    options += `<option value="${p.id_pregunta}">${p.pregunta}</option>`;
+                });
+                
+                const newRow = document.createElement('div');
+                newRow.className = 'form-row pregunta-row';
+                newRow.style = 'display:flex; gap:15px; margin-bottom: 15px; align-items:flex-end;';
+                newRow.innerHTML = `
+                    <div class="form-group" style="flex:1; margin-bottom:0;">
+                        <label>Pregunta</label>
+                        <select name="pregunta[]" style="width:100%; padding:12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px;" required onchange="actualizarOpcionesDisponibles()">
+                            ${options}
+                        </select>
+                    </div>
+                    <div class="form-group" style="flex:1; margin-bottom:0;">
+                        <label>Respuesta</label>
+                        <input type="text" name="respuesta[]" placeholder="Tu respuesta" required>
+                    </div>
+                    <button type="button" class="btn btn-eliminar" style="background:#ef4444; color:white; padding:12px; border-radius:8px; border:none; cursor:pointer;" onclick="eliminarFila(this)">🗑️</button>
+                `;
+                
+                container.appendChild(newRow);
+                actualizarBotones();
+            }
+            
+            function eliminarFila(btn) {
+                btn.parentElement.remove();
+                actualizarBotones();
+            }
+            
+            document.addEventListener('DOMContentLoaded', actualizarBotones);
+        </script>
+    </div>
 </div>
 
 </div> <!-- .container -->
