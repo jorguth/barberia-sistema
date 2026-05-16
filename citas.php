@@ -8,6 +8,9 @@ require_once("inc/pagination_helper.php");
 $mensaje = "";
 $tipo_mensaje = "";
 
+// Auto-cancelar citas pasadas que quedaron pendientes
+$conn->query("UPDATE cita SET estado = 'Cancelada' WHERE estado = 'Pendiente' AND fecha < CURDATE()");
+
 // Semana actual (navegación)
 $semana_offset = isset($_GET['semana']) ? intval($_GET['semana']) : 0;
 $hoy = new DateTime();
@@ -22,6 +25,29 @@ $fin_semana->modify('+6 days');
 
 $inicio_str = $inicio_semana->format('Y-m-d');
 $fin_str    = $fin_semana->format('Y-m-d');
+
+// -------------------------------------------------------
+// ELIMINAR CITA (solo admin)
+// -------------------------------------------------------
+if ($_SERVER['REQUEST_METHOD'] == 'GET' && isset($_GET['eliminar'])) {
+    if (esAdmin()) {
+        try {
+            $id = intval($_GET['eliminar']);
+            $stmt = $conn->prepare("DELETE FROM cita WHERE id_cita = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $stmt->close();
+            $mensaje = "Cita eliminada correctamente";
+            $tipo_mensaje = "success";
+        } catch (mysqli_sql_exception $e) {
+            $mensaje = "Error al eliminar: " . $e->getMessage();
+            $tipo_mensaje = "error";
+        }
+    } else {
+        $mensaje = "No tienes permisos para eliminar citas. Solo los administradores pueden realizar esta acción.";
+        $tipo_mensaje = "warning";
+    }
+}
 
 // -------------------------------------------------------
 // CREAR CITA
@@ -154,15 +180,26 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['cambiar_estado'])) {
         }
 
         // Verificar si la cita ya estaba completada antes
-        $stmt_check = $conn->prepare("SELECT estado, id_cliente FROM cita WHERE id_cita = ?");
+        $stmt_check = $conn->prepare("SELECT estado, id_cliente, fecha, hora FROM cita WHERE id_cita = ?");
         $stmt_check->bind_param("i", $id_cita);
         $stmt_check->execute();
         $res_check = $stmt_check->get_result()->fetch_assoc();
         $stmt_check->close();
 
         // VALIDACIÓN ESTADO COMPLETADO
-        if ($estado === 'Completada' && $res_check && $res_check['estado'] === 'Completada') {
-            throw new Exception("Esta cita ya fue marcada como completada anteriormente.");
+        if ($estado === 'Completada') {
+            if ($res_check && $res_check['estado'] === 'Completada') {
+                throw new Exception("Esta cita ya fue marcada como completada anteriormente.");
+            }
+            
+            // Validar que la cita ya haya ocurrido (fecha/hora <= AHORA)
+            if ($res_check) {
+                $fecha_hora_cita = strtotime($res_check['fecha'] . ' ' . $res_check['hora']);
+                // Permitir completar si la hora ya pasó o es exactamente ahora
+                if ($fecha_hora_cita > time()) {
+                    throw new Exception("No puedes completar una cita que aún no ha ocurrido o está en el futuro.");
+                }
+            }
         }
 
         $conn->begin_transaction(); // Iniciar transacción por seguridad
@@ -226,28 +263,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['cambiar_estado'])) {
     }
 }
 
-// -------------------------------------------------------
-// ELIMINAR CITA (solo admin)
-// -------------------------------------------------------
-if (isset($_GET['eliminar'])) {
-    if (esAdmin()) {
-        try {
-            $id = intval($_GET['eliminar']);
-            $stmt = $conn->prepare("DELETE FROM cita WHERE id_cita = ?");
-            $stmt->bind_param("i", $id);
-            $stmt->execute();
-            $stmt->close();
-            $mensaje = "Cita eliminada correctamente";
-            $tipo_mensaje = "success";
-        } catch (mysqli_sql_exception $e) {
-            $mensaje = "Error al eliminar: " . $e->getMessage();
-            $tipo_mensaje = "error";
-        }
-    } else {
-        $mensaje = "No tienes permisos para eliminar citas. Solo los administradores pueden realizar esta acción.";
-        $tipo_mensaje = "warning";
-    }
-}
 
 // -------------------------------------------------------
 // OBTENER CITAS DE LA SEMANA
@@ -1298,6 +1313,20 @@ foreach ($todas_citas as $cita) {
 echo json_encode($citas_js, JSON_UNESCAPED_UNICODE);
 ?>;
 
+const CITAS_OCUPADAS = <?php
+    $ocupadas = [];
+    $stmt_oc = $conn->query("SELECT fecha, hora FROM cita WHERE estado != 'Cancelada'");
+    if ($stmt_oc) {
+        while ($row = $stmt_oc->fetch_assoc()) {
+            $f = $row['fecha'];
+            $h = substr($row['hora'], 0, 5);
+            if (!isset($ocupadas[$f])) $ocupadas[$f] = [];
+            $ocupadas[$f][] = $h;
+        }
+    }
+    echo json_encode($ocupadas);
+?>;
+
 const ES_ADMIN   = <?php echo esAdmin()   ? 'true' : 'false'; ?>;
 const ES_BARBERO = <?php echo esBarbero() ? 'true' : 'false'; ?>;
 const SEMANA_OFFSET = <?php echo $semana_offset; ?>;
@@ -1350,8 +1379,34 @@ function abrirModalNueva(fecha = '', hora = '', id_cita = 0) {
         }
     }
     
+    actualizarHorasDisponibles();
     modal.classList.add('active');
 }
+
+function actualizarHorasDisponibles() {
+    const fechaSelect = document.getElementById('fecha_nueva').value;
+    const horaSelect = document.getElementById('hora_nueva');
+    const idCitaActual = document.getElementById('id_cita_nueva').value;
+    
+    let horaOriginal = '';
+    if (idCitaActual > 0 && CITAS_DATA[idCitaActual] && CITAS_DATA[idCitaActual].fecha === fechaSelect) {
+        horaOriginal = CITAS_DATA[idCitaActual].hora;
+    }
+
+    const horasOcupadas = CITAS_OCUPADAS[fechaSelect] || [];
+    
+    Array.from(horaSelect.options).forEach(opt => {
+        if (horasOcupadas.includes(opt.value) && opt.value !== horaOriginal) {
+            opt.disabled = true;
+            opt.text = opt.value + ' (Ocupado)';
+        } else {
+            opt.disabled = false;
+            opt.text = opt.value;
+        }
+    });
+}
+
+document.getElementById('fecha_nueva').addEventListener('change', actualizarHorasDisponibles);
 
 function cerrarModal(id) {
     document.getElementById(id).classList.remove('active');

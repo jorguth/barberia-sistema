@@ -21,6 +21,24 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar'])) {
         $telefono = trim($_POST['telefono']);
         $id_usuario = !empty($_POST['id_usuario']) ? intval($_POST['id_usuario']) : NULL;
         
+        // Validación del teléfono
+        if (!empty($telefono)) {
+            if (!preg_match('/^[0-9]{10}$/', $telefono)) {
+                throw new Exception("El teléfono debe contener exactamente 10 dígitos numéricos.");
+            }
+        }
+        
+        // Validación para evitar duplicidad de Nombre + Teléfono
+        $stmt_dup = $conn->prepare("SELECT id_cliente FROM cliente WHERE nombre = ? AND telefono = ? AND id_cliente != ?");
+        $stmt_dup->bind_param("ssi", $nombre, $telefono, $id);
+        $stmt_dup->execute();
+        $res_dup = $stmt_dup->get_result();
+        if ($res_dup->num_rows > 0) {
+            $stmt_dup->close();
+            throw new Exception("Ya existe un cliente registrado con el nombre '$nombre' y el teléfono '$telefono'.");
+        }
+        $stmt_dup->close();
+        
         if ($id > 0) {
             // ACTUALIZAR
             $stmt = $conn->prepare("UPDATE cliente SET nombre = ?, telefono = ?, id_usuario = ? WHERE id_cliente = ?");
@@ -38,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar'])) {
         $tipo_mensaje = "success";
         $stmt->close();
         
-    } catch (mysqli_sql_exception $e) {
+    } catch (Exception $e) {
         $mensaje = "Error: " . $e->getMessage();
         $tipo_mensaje = "error";
     }
@@ -55,7 +73,7 @@ if (isset($_GET['eliminar'])) {
             $stmt->close();
             $mensaje = "Cliente eliminado correctamente";
             $tipo_mensaje = "success";
-        } catch (mysqli_sql_exception $e) {
+        } catch (Exception $e) {
             $mensaje = "Error al eliminar cliente: " . $e->getMessage();
             $tipo_mensaje = "error";
         }
@@ -424,13 +442,18 @@ try {
                 </div>
                 
                 <div class="form-group">
-                    <label for="telefono">Teléfono</label>
+                    <label for="telefono">Teléfono <span class="required">*</span></label>
                     <input 
                         type="tel" 
                         id="telefono"
                         name="telefono" 
                         placeholder="Ej: 5512345678"
+                        pattern="[0-9]{10}"
+                        maxlength="10"
+                        title="El teléfono debe contener exactamente 10 dígitos"
+                        oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 10);"
                         value="<?php echo $cliente_editar ? htmlspecialchars($cliente_editar['telefono']) : ''; ?>"
+                        required
                     >
                 </div>
                 

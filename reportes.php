@@ -36,15 +36,19 @@ switch ($periodo) {
 }
 
 /* ============================================================
-   KPIs PRINCIPALES
+   KPIs PRINCIPALES (Solo ventas activas)
    ============================================================ */
-$ingr_ventas  = (float)($conn->query("SELECT SUM(total) t FROM venta WHERE fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
-$num_ventas   = (int)($conn->query("SELECT COUNT(*) t FROM venta WHERE fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
+$ingr_ventas  = (float)($conn->query("SELECT SUM(total) t FROM venta WHERE estado='Activa' AND fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
+$num_ventas   = (int)($conn->query("SELECT COUNT(*) t FROM venta WHERE estado='Activa' AND fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
 $num_citas    = (int)($conn->query("SELECT COUNT(*) t FROM cita WHERE estado='Completada' AND fecha BETWEEN '$desde' AND '$hasta'")->fetch_assoc()['t'] ?? 0);
 $ingr_citas   = (float)($conn->query("SELECT SUM(total_general) t FROM cita WHERE estado='Completada' AND fecha BETWEEN '$desde' AND '$hasta'")->fetch_assoc()['t'] ?? 0);
 $total_ingr   = $ingr_ventas + $ingr_citas;
 $ticket_prom  = ($num_ventas + $num_citas) > 0 ? $total_ingr / ($num_ventas + $num_citas) : 0;
 $total_clientes = (int)($conn->query("SELECT COUNT(*) t FROM cliente")->fetch_assoc()['t'] ?? 0);
+
+// KPIs de Cancelaciones
+$num_canceladas = (int)($conn->query("SELECT COUNT(*) t FROM venta WHERE estado='Cancelada' AND fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
+$monto_cancelado = (float)($conn->query("SELECT SUM(total) t FROM venta WHERE estado='Cancelada' AND fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'")->fetch_assoc()['t'] ?? 0);
 
 /* ============================================================
    GRÁFICA 1 – Ingresos por mes (últimos 12 meses)
@@ -58,7 +62,7 @@ for ($i = 11; $i >= 0; $i--) {
     [$y, $m]   = explode('-', $fecha_mes);
     $meses_labels[] = date('M Y', mktime(0,0,0,$m,1,$y));
 
-    $v = (float)($conn->query("SELECT SUM(total) t FROM venta WHERE YEAR(fecha_venta)=$y AND MONTH(fecha_venta)=$m")->fetch_assoc()['t'] ?? 0);
+    $v = (float)($conn->query("SELECT SUM(total) t FROM venta WHERE estado='Activa' AND YEAR(fecha_venta)=$y AND MONTH(fecha_venta)=$m")->fetch_assoc()['t'] ?? 0);
     $c = (float)($conn->query("SELECT SUM(total_general) t FROM cita WHERE estado='Completada' AND YEAR(fecha)=$y AND MONTH(fecha)=$m")->fetch_assoc()['t'] ?? 0);
     $meses_ventas[] = $v;
     $meses_citas[]  = $c;
@@ -86,7 +90,7 @@ while ($r = $top_servicios->fetch_assoc()) {
    ============================================================ */
 $pago_res = $conn->query("
     SELECT metodo_pago, COUNT(*) AS cant, SUM(total) AS total
-    FROM venta WHERE fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'
+    FROM venta WHERE estado='Activa' AND fecha_venta >= '$desde 00:00:00' AND fecha_venta <= '$hasta 23:59:59'
     GROUP BY metodo_pago
 ");
 $pago_labels = [];
@@ -104,7 +108,7 @@ $top_productos = $conn->query("
     FROM venta_detalle vd
     JOIN producto p ON vd.id_producto = p.id_producto
     JOIN venta v ON vd.id_venta = v.id_venta
-    WHERE v.fecha_venta >= '$desde 00:00:00' AND v.fecha_venta <= '$hasta 23:59:59'
+    WHERE v.estado='Activa' AND v.fecha_venta >= '$desde 00:00:00' AND v.fecha_venta <= '$hasta 23:59:59'
     GROUP BY vd.id_producto ORDER BY total_cant DESC LIMIT 10
 ");
 
@@ -118,6 +122,19 @@ $ult_citas = $conn->query("
     LEFT JOIN cliente cl ON c.id_cliente = cl.id_cliente
     WHERE c.estado='Completada' AND c.fecha BETWEEN '$desde' AND '$hasta'
     ORDER BY c.fecha DESC, c.hora DESC LIMIT 8
+");
+
+/* ============================================================
+   TABLA – Ventas Canceladas
+   ============================================================ */
+$ventas_canceladas = $conn->query("
+    SELECT v.id_venta, v.fecha_venta, v.total, v.motivo_cancelacion, 
+           c.nombre AS cliente, u.nombre_usuario AS vendedor
+    FROM venta v
+    LEFT JOIN cliente c ON v.id_cliente = c.id_cliente
+    LEFT JOIN usuario u ON v.id_usuario = u.id_usuario
+    WHERE v.estado='Cancelada' AND v.fecha_venta >= '$desde 00:00:00' AND v.fecha_venta <= '$hasta 23:59:59'
+    ORDER BY v.fecha_venta DESC LIMIT 10
 ");
 ?>
 <!DOCTYPE html>
@@ -518,8 +535,37 @@ $ult_citas = $conn->query("
             <?php else: ?>
             <div class="empty-state">Sin citas completadas en el período.</div>
             <?php endif; ?>
-        </div>
+    </div>
 
+    <!-- ===== TABLA CANCELACIONES ===== -->
+    <div class="table-card" style="margin-top: 20px;">
+        <div class="table-header" style="border-bottom-color: #ef4444; color: #ef4444;">🚫 Ventas Canceladas en el Período</div>
+        <?php if ($ventas_canceladas && $ventas_canceladas->num_rows > 0): ?>
+        <table class="rep">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Cliente</th>
+                    <th>Vendedor</th>
+                    <th>Total</th>
+                    <th>Motivo de Cancelación</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php while ($r = $ventas_canceladas->fetch_assoc()): ?>
+            <tr>
+                <td><?= date('d/m/Y H:i', strtotime($r['fecha_venta'])) ?></td>
+                <td><?= htmlspecialchars($r['cliente'] ?? 'Sin cliente') ?></td>
+                <td><?= htmlspecialchars($r['vendedor'] ?? '—') ?></td>
+                <td style="color:#ef4444; font-weight:700;">$<?= number_format($r['total'], 2) ?></td>
+                <td style="font-style: italic; color: #666;"><?= htmlspecialchars($r['motivo_cancelacion'] ?: 'Sin motivo especificado') ?></td>
+            </tr>
+            <?php endwhile; ?>
+            </tbody>
+        </table>
+        <?php else: ?>
+        <div class="empty-state">No se registraron cancelaciones en este período.</div>
+        <?php endif; ?>
     </div>
 
 </div><!-- /container -->

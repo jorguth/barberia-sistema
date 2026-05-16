@@ -19,6 +19,22 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] == 'POST' &&
         $pass = $_POST['contrasena']; 
         $rol = $_POST['id_rol'];
 
+        // Validación: contraseña mínima de 6 caracteres
+        if (strlen($pass) < 6) {
+            throw new Exception("La contraseña debe tener al menos 6 caracteres.");
+        }
+
+        // Validación: evitar nombre de usuario duplicado
+        $stmt_check = $conn->prepare("SELECT id_usuario FROM usuario WHERE nombre_usuario = ?");
+        $stmt_check->bind_param("s", $nombre);
+        $stmt_check->execute();
+        $res_check = $stmt_check->get_result();
+        if ($res_check->num_rows > 0) {
+            $stmt_check->close();
+            throw new Exception("El nombre de usuario '$nombre' ya está registrado. Por favor, elige otro.");
+        }
+        $stmt_check->close();
+
         $stmt = $conn->prepare("INSERT INTO usuario (nombre_usuario, contrasena, id_rol) VALUES (?, ?, ?)");
         $stmt->bind_param("ssi", $nombre, $pass, $rol);
         
@@ -27,7 +43,7 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] == 'POST' &&
             $tipo_mensaje = "success";
         }
         $stmt->close();
-    } catch (mysqli_sql_exception $e) {
+    } catch (Exception $e) {
         $mensaje = "Error al registrar: " . $e->getMessage();
         $tipo_mensaje = "error";
     }
@@ -393,6 +409,7 @@ try {
                         id="contrasena"
                         name="contrasena" 
                         placeholder="Mínimo 6 caracteres"
+                        minlength="6"
                         required
                     >
                 </div>

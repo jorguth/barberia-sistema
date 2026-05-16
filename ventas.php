@@ -119,6 +119,122 @@ if (isset($_GET['eliminar'])) {
 }
 
 /* ============================================================
+   CANCELAR VENTA (solo admin)
+   ============================================================ */
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['cancelar_venta'])) {
+    if (esAdmin()) {
+        try {
+            $id = intval($_POST['id_venta_cancelar']);
+            $motivo = trim($_POST['motivo_cancelacion']);
+
+            $conn->begin_transaction();
+
+            $stmt = $conn->prepare("SELECT estado FROM venta WHERE id_venta = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $res = $stmt->get_result()->fetch_assoc();
+            if (!$res) throw new Exception("Venta no encontrada.");
+            if ($res['estado'] == 'Cancelada') throw new Exception("La venta ya está cancelada.");
+            $stmt->close();
+
+            $stmt = $conn->prepare("UPDATE venta SET estado = 'Cancelada', motivo_cancelacion = ? WHERE id_venta = ?");
+            $stmt->bind_param("si", $motivo, $id);
+            $stmt->execute();
+            $stmt->close();
+
+            // Restaurar stock de los productos vendidos
+            $stmt = $conn->prepare("SELECT id_producto, cantidad FROM venta_detalle WHERE id_venta = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $detalles = $stmt->get_result();
+            
+            $stmt_upd = $conn->prepare("UPDATE producto SET stock = stock + ? WHERE id_producto = ?");
+            while ($row = $detalles->fetch_assoc()) {
+                $stmt_upd->bind_param("ii", $row['cantidad'], $row['id_producto']);
+                $stmt_upd->execute();
+            }
+            $stmt_upd->close();
+            $stmt->close();
+
+            $conn->commit();
+            $mensaje = "Venta #$id cancelada correctamente y stock restaurado.";
+            $tipo_mensaje = "success";
+        } catch (Exception $e) {
+            if ($conn->in_transaction) $conn->rollback();
+            $mensaje = "Error al cancelar venta: " . $e->getMessage();
+            $tipo_mensaje = "error";
+        }
+    } else {
+        $mensaje = "No tienes permisos para cancelar ventas.";
+        $tipo_mensaje = "warning";
+    }
+}
+/* ============================================================
+   RESTAURAR VENTA (Deshacer cancelación)
+   ============================================================ */
+if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['restaurar_venta'])) {
+    if (esAdmin()) {
+        try {
+            $id = intval($_POST['id_venta_restaurar']);
+            $conn->begin_transaction();
+
+            $stmt = $conn->prepare("SELECT estado FROM venta WHERE id_venta = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $res = $stmt->get_result()->fetch_assoc();
+            if (!$res) throw new Exception("Venta no encontrada.");
+            if ($res['estado'] == 'Activa') throw new Exception("La venta ya está activa.");
+            $stmt->close();
+
+            // Verificar stock antes de restaurar
+            $stmt = $conn->prepare("
+                SELECT vd.cantidad, p.nombre, p.stock, vd.id_producto 
+                FROM venta_detalle vd 
+                JOIN producto p ON vd.id_producto = p.id_producto 
+                WHERE vd.id_venta = ?
+            ");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $detalles = $stmt->get_result();
+            
+            $items_a_descontar = [];
+            while ($row = $detalles->fetch_assoc()) {
+                if ($row['stock'] < $row['cantidad']) {
+                    throw new Exception("No hay suficiente stock de '{$row['nombre']}' para restaurar la venta (Requerido: {$row['cantidad']}, Disponible: {$row['stock']})");
+                }
+                $items_a_descontar[] = $row;
+            }
+            $stmt->close();
+
+            // Descontar stock
+            $stmt_upd = $conn->prepare("UPDATE producto SET stock = stock - ? WHERE id_producto = ?");
+            foreach ($items_a_descontar as $item) {
+                $stmt_upd->bind_param("ii", $item['cantidad'], $item['id_producto']);
+                $stmt_upd->execute();
+            }
+            $stmt_upd->close();
+
+            // Cambiar estado a Activa
+            $stmt = $conn->prepare("UPDATE venta SET estado = 'Activa', motivo_cancelacion = NULL WHERE id_venta = ?");
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $stmt->close();
+
+            $conn->commit();
+            $mensaje = "Venta #$id restaurada correctamente.";
+            $tipo_mensaje = "success";
+        } catch (Exception $e) {
+            if ($conn->in_transaction) $conn->rollback();
+            $mensaje = "Error al restaurar venta: " . $e->getMessage();
+            $tipo_mensaje = "error";
+        }
+    } else {
+        $mensaje = "No tienes permisos para restaurar ventas.";
+        $tipo_mensaje = "warning";
+    }
+}
+
+/* ============================================================
    DATOS PARA EL FORMULARIO
    ============================================================ */
 $clientes  = $conn->query("SELECT id_cliente, nombre FROM cliente ORDER BY nombre");
@@ -149,6 +265,7 @@ $ventas = $conn->query("
 $total_periodo = $conn->query("
     SELECT SUM(total) as total FROM venta
     WHERE fecha_venta >= '$filtro_desde 00:00:00' AND fecha_venta <= '$filtro_hasta 23:59:59'
+    AND estado = 'Activa'
 ")->fetch_assoc()['total'] ?? 0;
 ?>
 <!DOCTYPE html>
@@ -713,18 +830,18 @@ $total_periodo = $conn->query("
                     <td><?= date('d/m/Y H:i', strtotime($v['fecha_venta'])) ?></td>
                     <td><?= htmlspecialchars($v['nombre_cliente'] ?? 'Sin cliente') ?></td>
                     <td><?= htmlspecialchars($v['nombre_usuario'] ?? '—') ?></td>
-                    <td><strong style="color:#667eea">$<?= number_format($v['total'], 2) ?></strong></td>
+                    <td>
+                        <?php if ($v['estado'] === 'Cancelada'): ?>
+                            <strong style="color:#9ca3af; text-decoration: line-through;">$<?= number_format($v['total'], 2) ?></strong>
+                            <span style="font-size:10px;background:#fee2e2;color:#dc2626;padding:2px 6px;border-radius:10px;margin-left:4px;">Cancelada</span>
+                        <?php else: ?>
+                            <strong style="color:#667eea">$<?= number_format($v['total'], 2) ?></strong>
+                        <?php endif; ?>
+                    </td>
                     <td><span class="badge-pago badge-<?= $v['metodo_pago'] ?>"><?= $v['metodo_pago'] ?></span></td>
                     <td>
                         <div class="action-links">
-                            <button class="btn-ver" onclick="verVenta(<?= $v['id_venta'] ?>)">🔍 Ver</button>
-                            <?php if (esAdmin()): ?>
-                            <a class="btn-del"
-                               href="?eliminar=<?= $v['id_venta'] ?>&desde=<?= $filtro_desde ?>&hasta=<?= $filtro_hasta ?>"
-                               onclick="event.preventDefault(); confirmacion('¿Eliminar venta #<?= $v['id_venta'] ?>? El stock será restaurado.', '🗑️ Eliminar', () => window.location.href='?eliminar=<?= $v['id_venta'] ?>')">
-                               🗑️
-                            </a>
-                            <?php endif; ?>
+                            <button class="btn-ver" onclick="verVenta(<?= $v['id_venta'] ?>)">🔍 Ver / Editar</button>
                         </div>
                     </td>
                 </tr>
@@ -784,6 +901,7 @@ try {
 /* ===== DATOS ===== */
 const VENTAS = <?= json_encode($ventas_js, JSON_UNESCAPED_UNICODE) ?>;
 const PRODUCTOS = <?= json_encode($prods_js, JSON_UNESCAPED_UNICODE) ?>;
+const esAdminJS = <?= esAdmin() ? 'true' : 'false' ?>;
 
 /* ===== TABLA DE ITEMS DINÁMICA ===== */
 let rowCount = 0;
@@ -931,8 +1049,14 @@ function verVenta(id) {
     } else {
         detallesHtml = '<p style="color:#bbb;font-size:13px;">Sin detalle disponible.</p>';
     }
+    
+    let estadoHtml = '';
+    if (v.estado === 'Cancelada') {
+        estadoHtml = `<div style="background:#fee2e2;color:#dc2626;padding:10px;border-radius:8px;margin-bottom:15px;text-align:center;font-weight:bold;">🚫 VENTA CANCELADA<br><span style="font-size:12px;font-weight:normal;">Motivo: ${v.motivo_cancelacion || 'No especificado'}</span></div>`;
+    }
 
     document.getElementById('modal-cuerpo').innerHTML = `
+        ${estadoHtml}
         <div class="det-row"><span class="det-label">Fecha:</span><span>${new Date(v.fecha_venta.replace(' ','T')).toLocaleString('es-MX')}</span></div>
         <div class="det-row"><span class="det-label">Cliente:</span><span>${v.nombre_cliente || 'Sin cliente'}</span></div>
         <div class="det-row"><span class="det-label">Vendedor:</span><span>${v.nombre_usuario || '—'}</span></div>
@@ -945,6 +1069,38 @@ function verVenta(id) {
             ${parseFloat(v.descuento) > 0 ? `<div class="det-row"><span class="det-label">Descuento:</span><span style="color:#ef4444">-$${parseFloat(v.descuento).toFixed(2)}</span></div>` : ''}
             <div class="det-row" style="font-size:18px;font-weight:700;color:#667eea"><span>TOTAL:</span><span>$${parseFloat(v.total).toFixed(2)}</span></div>
         </div>
+        ${esAdminJS ? `
+        <div style="margin-top:20px;text-align:center;">
+            <button class="btn" style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;width:100%;justify-content:center;" onclick="document.getElementById('opciones-edicion-${v.id_venta}').style.display='block';this.style.display='none';">⚙️ Opciones de Administración</button>
+        </div>
+        <div id="opciones-edicion-${v.id_venta}" style="display:none;margin-top:15px;padding:15px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;">
+            <p style="font-size:13px;color:#4b5563;margin-bottom:10px;text-align:center;font-weight:600;">Panel de Control</p>
+            <div style="display:flex;gap:10px;">
+                ${v.estado === 'Activa' ? `
+                    <button class="btn" style="background:#f59e0b;color:white;flex:1;justify-content:center;padding:8px;" onclick="document.getElementById('form-cancelacion-${v.id_venta}').style.display='block';">🚫 Cancelar Venta</button>
+                ` : `
+                    <button class="btn" style="background:#10b981;color:white;flex:1;justify-content:center;padding:8px;" onclick="document.getElementById('form-restaurar-${v.id_venta}').style.display='block';">🔄 Restaurar Venta</button>
+                `}
+                <button class="btn" style="background:#ef4444;color:white;flex:1;justify-content:center;padding:8px;" onclick="confirmacion('¿Eliminar esta venta definitivamente? El registro se perderá permanentemente.', '🗑️ Eliminar', () => window.location.href='?eliminar=${v.id_venta}&desde=<?= $filtro_desde ?>&hasta=<?= $filtro_hasta ?>')">🗑️ Eliminar Registro</button>
+            </div>
+            
+            <div id="form-cancelacion-${v.id_venta}" style="display:none;margin-top:15px;">
+                <form method="POST">
+                    <input type="hidden" name="id_venta_cancelar" value="${v.id_venta}">
+                    <textarea name="motivo_cancelacion" rows="2" placeholder="Motivo de la cancelación (opcional)..." style="width:100%;padding:10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;margin-bottom:10px;resize:vertical;"></textarea>
+                    <button type="submit" name="cancelar_venta" class="btn" style="background:#dc2626;color:white;width:100%;justify-content:center;">Confirmar Cancelación</button>
+                </form>
+            </div>
+
+            <div id="form-restaurar-${v.id_venta}" style="display:none;margin-top:15px;">
+                <form method="POST">
+                    <input type="hidden" name="id_venta_restaurar" value="${v.id_venta}">
+                    <p style="font-size:12px;color:#666;margin-bottom:10px;text-align:center;">¿Estás seguro de restaurar esta venta? Se volverá a descontar del inventario.</p>
+                    <button type="submit" name="restaurar_venta" class="btn" style="background:#10b981;color:white;width:100%;justify-content:center;">Confirmar Restauración</button>
+                </form>
+            </div>
+        </div>
+        ` : ''}
     `;
     document.getElementById('modalDetalle').classList.add('active');
 }
