@@ -47,7 +47,7 @@ $num_citas    = (int)($conn->query("SELECT COUNT(*) t FROM cita WHERE estado='Co
 $ingr_citas   = (float)($conn->query("SELECT SUM(total_general) t FROM cita WHERE estado='Completada' AND fecha BETWEEN '$desde' AND '$hasta'")->fetch_assoc()['t'] ?? 0);
 $total_ingr   = $ingr_ventas + $ingr_citas;
 $ticket_prom  = ($num_ventas + $num_citas) > 0 ? $total_ingr / ($num_ventas + $num_citas) : 0;
-$total_clientes = (int)($conn->query("SELECT COUNT(*) t FROM cliente")->fetch_assoc()['t'] ?? 0);
+$total_clientes = (int)($conn->query("SELECT COUNT(*) t FROM cliente WHERE activo = 1")->fetch_assoc()['t'] ?? 0);
 
 // KPIs de Cancelaciones
 $num_canceladas = (int)($conn->query("SELECT COUNT(*) t FROM venta WHERE estado='Cancelada' $where_sql")->fetch_assoc()['t'] ?? 0);
@@ -395,6 +395,7 @@ foreach($det_data_all as $r) $total_monto += (float)$r['monto'];
             box-shadow: 0 2px 12px rgba(0,0,0,0.06);
             overflow: hidden;
             margin-bottom: 24px;
+            scroll-margin-top: 80px;
         }
         .table-header {
             padding: 16px 20px;
@@ -598,7 +599,7 @@ foreach($det_data_all as $r) $total_monto += (float)$r['monto'];
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
 
         <!-- Top productos -->
-        <div class="table-card">
+        <div class="table-card" id="top_prod">
             <div class="table-header">🛍️ Top Productos Vendidos</div>
             <?php if ($top_productos && $top_productos->num_rows > 0): ?>
             <table class="rep">
@@ -621,7 +622,7 @@ foreach($det_data_all as $r) $total_monto += (float)$r['monto'];
         </div>
 
         <!-- Últimas citas completadas -->
-        <div class="table-card">
+        <div class="table-card" id="ult_citas">
             <div class="table-header">📅 Citas Completadas Recientes</div>
             <?php if ($ult_citas && $ult_citas->num_rows > 0): ?>
             <table class="rep">
@@ -650,7 +651,7 @@ foreach($det_data_all as $r) $total_monto += (float)$r['monto'];
         </div>
 
     <!-- ===== TABLA CANCELACIONES ===== -->
-    <div class="table-card" style="margin-top: 20px;">
+    <div class="table-card" id="ventas_cancel" style="margin-top: 20px;">
         <div class="table-header" style="border-bottom-color: #ef4444; color: #ef4444;">🚫 Ventas Canceladas en el Período</div>
         <?php if ($ventas_canceladas && $ventas_canceladas->num_rows > 0): ?>
         <table class="rep">

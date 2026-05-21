@@ -68,7 +68,7 @@ Aquí defines lo que ofreces y cuánto cobras.
 
 ---
 
-## 📊 6. Reportes (Solo Administradores)
+## 📊 6. Reportes (Administradores y Barberos)
 La sección inteligente para ver si el negocio es rentable.
 
 *   **Gráficos de Pastel:** Te muestran qué método de pago usan más tus clientes (ej. 70% Efectivo).

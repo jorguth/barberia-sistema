@@ -24,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar'])) {
         
         
         // VERIFICAR DUPLICADOS
-        $stmt_check = $conn->prepare("SELECT id_producto FROM producto WHERE nombre = ? AND id_producto != ?");
+        $stmt_check = $conn->prepare("SELECT id_producto FROM producto WHERE nombre = ? AND id_producto != ? AND activo = 1");
         $stmt_check->bind_param("si", $nombre, $id);
         $stmt_check->execute();
         if ($stmt_check->get_result()->num_rows > 0) {
@@ -103,11 +103,22 @@ if (isset($_GET['eliminar'])) {
             $stmt->bind_param("i", $id);
             $stmt->execute();
             $stmt->close();
-            $mensaje = "Producto eliminado correctamente";
+            $mensaje = "Producto eliminado permanentemente (no tenía ventas registradas)";
             $tipo_mensaje = "success";
         } catch (mysqli_sql_exception $e) {
-            $mensaje = "Error al eliminar producto: " . $e->getMessage();
-            $tipo_mensaje = "error";
+            // Error 1451: Cannot delete or update a parent row: a foreign key constraint fails
+            if ($e->getCode() == 1451) {
+                // Borrado Lógico (Soft Delete)
+                $stmt_soft = $conn->prepare("UPDATE producto SET activo = 0 WHERE id_producto = ?");
+                $stmt_soft->bind_param("i", $id);
+                $stmt_soft->execute();
+                $stmt_soft->close();
+                $mensaje = "Producto archivado (oculto). No se borró permanentemente porque ya tiene ventas registradas, pero ya no aparecerá en el sistema.";
+                $tipo_mensaje = "success";
+            } else {
+                $mensaje = "Error al eliminar producto: " . $e->getMessage();
+                $tipo_mensaje = "error";
+            }
         }
     } else {
         $mensaje = "No tienes permisos para eliminar productos. Solo los administradores pueden realizar esta acción.";
@@ -129,13 +140,13 @@ if (isset($_GET['editar'])) {
 // CONSULTAR PRODUCTOS CON PAGINACIÓN Y BÚSQUEDA
 try {
     $search = isset($_GET['q']) ? trim($_GET['q']) : '';
-    $where_sql = "";
+    $where_sql = " WHERE activo = 1";
     if ($search !== '') {
-        $where_sql = " WHERE nombre LIKE '%" . $conn->real_escape_string($search) . "%'";
+        $where_sql .= " AND nombre LIKE '%" . $conn->real_escape_string($search) . "%'";
     }
 
     // Obtener los IDs de los últimos 3 productos para la lógica de "NUEVO"
-    $res_top = $conn->query("SELECT id_producto FROM producto ORDER BY id_producto DESC LIMIT 3");
+    $res_top = $conn->query("SELECT id_producto FROM producto WHERE activo = 1 ORDER BY id_producto DESC LIMIT 3");
     $top_ids = [];
     while($r = $res_top->fetch_assoc()) $top_ids[] = $r['id_producto'];
     $top_ids_str = !empty($top_ids) ? implode(',', $top_ids) : '0';
@@ -158,9 +169,9 @@ try {
                                LIMIT $limit OFFSET $offset");
     
     // Calcular valor total del inventario
-    $valor_inventario = $conn->query("SELECT SUM(stock * precio) as total FROM producto")->fetch_assoc()['total'] ?? 0;
-    $total_productos = $conn->query("SELECT COUNT(*) as total FROM producto")->fetch_assoc()['total'] ?? 0;
-    $productos_bajo_stock = $conn->query("SELECT COUNT(*) as total FROM producto WHERE stock < 5")->fetch_assoc()['total'] ?? 0;
+    $valor_inventario = $conn->query("SELECT SUM(stock * precio) as total FROM producto WHERE activo = 1")->fetch_assoc()['total'] ?? 0;
+    $total_productos = $conn->query("SELECT COUNT(*) as total FROM producto WHERE activo = 1")->fetch_assoc()['total'] ?? 0;
+    $productos_bajo_stock = $conn->query("SELECT COUNT(*) as total FROM producto WHERE stock < 5 AND activo = 1")->fetch_assoc()['total'] ?? 0;
     
 } catch (mysqli_sql_exception $e) {
     $productos = false;
@@ -681,7 +692,7 @@ try {
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">
             <h3 style="border:none; margin:0; padding:0;">Inventario de Productos</h3>
             
-            <form id="searchForm" style="display: flex; gap: 8px;">
+            <form id="searchForm" action="#inventario-productos" style="display: flex; gap: 8px;">
                 <input 
                     type="text" 
                     id="searchInput"
@@ -860,7 +871,7 @@ window.onclick = function(event) {
                 if (this.value.trim() !== currentQ) {
                     searchForm.submit();
                 }
-            }, 600);
+            }, 400);
         });
 
         // Mantener el foco

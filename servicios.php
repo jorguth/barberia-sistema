@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar'])) {
             $tipo_mensaje = "error";
         } else {
             // VERIFICAR DUPLICADOS
-            $stmt_check = $conn->prepare("SELECT id_servicio FROM servicio WHERE nombre = ? AND id_servicio != ?");
+            $stmt_check = $conn->prepare("SELECT id_servicio FROM servicio WHERE nombre = ? AND id_servicio != ? AND activo = 1");
             $stmt_check->bind_param("si", $nombre, $id);
             $stmt_check->execute();
             if ($stmt_check->get_result()->num_rows > 0) {
@@ -69,11 +69,21 @@ if (isset($_GET['eliminar'])) {
             $stmt->bind_param("i", $id);
             $stmt->execute();
             $stmt->close();
-            $mensaje = "Servicio eliminado correctamente";
+            $mensaje = "Servicio eliminado permanentemente (no tenía citas asociadas)";
             $tipo_mensaje = "success";
         } catch (mysqli_sql_exception $e) {
-            $mensaje = "Error al eliminar servicio: " . $e->getMessage();
-            $tipo_mensaje = "error";
+            if ($e->getCode() == 1451) {
+                // Borrado Lógico (Soft Delete)
+                $stmt_soft = $conn->prepare("UPDATE servicio SET activo = 0 WHERE id_servicio = ?");
+                $stmt_soft->bind_param("i", $id);
+                $stmt_soft->execute();
+                $stmt_soft->close();
+                $mensaje = "Servicio archivado (oculto). No se borró permanentemente porque ya tiene citas registradas en el historial.";
+                $tipo_mensaje = "success";
+            } else {
+                $mensaje = "Error al eliminar servicio: " . $e->getMessage();
+                $tipo_mensaje = "error";
+            }
         }
     } else {
         $mensaje = "No tienes permisos para eliminar servicios. Solo los administradores pueden realizar esta acción.";
@@ -95,13 +105,13 @@ if (isset($_GET['editar'])) {
 // CONSULTAR SERVICIOS CON PAGINACIÓN Y BÚSQUEDA
 try {
     $search = isset($_GET['q']) ? trim($_GET['q']) : '';
-    $where_sql = "";
+    $where_sql = " WHERE activo = 1";
     if ($search !== '') {
-        $where_sql = " WHERE nombre LIKE '%" . $conn->real_escape_string($search) . "%'";
+        $where_sql .= " AND nombre LIKE '%" . $conn->real_escape_string($search) . "%'";
     }
 
     // Obtener los IDs de los últimos 3 servicios registrados para la lógica de "NUEVO"
-    $res_top = $conn->query("SELECT id_servicio FROM servicio ORDER BY id_servicio DESC LIMIT 3");
+    $res_top = $conn->query("SELECT id_servicio FROM servicio WHERE activo = 1 ORDER BY id_servicio DESC LIMIT 3");
     $top_ids = [];
     while($r = $res_top->fetch_assoc()) $top_ids[] = $r['id_servicio'];
     $top_ids_str = !empty($top_ids) ? implode(',', $top_ids) : '0';
@@ -482,7 +492,7 @@ try {
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">
             <h3 style="border:none; margin:0; padding:0;">Catálogo de Servicios</h3>
             
-            <form id="searchForm" style="display: flex; gap: 8px;">
+            <form id="searchForm" action="#catalogo-servicios" style="display: flex; gap: 8px;">
                 <input 
                     type="text" 
                     id="searchInput"
@@ -575,7 +585,7 @@ try {
             if (this.value.trim() !== currentQ) {
                 searchForm.submit();
             }
-        }, 600);
+        }, 400);
     });
 
     // Mantener el foco al final del texto después de recargar

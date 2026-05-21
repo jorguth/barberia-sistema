@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar'])) {
         }
         
         // Validación para evitar duplicidad de Nombre + Teléfono
-        $stmt_dup = $conn->prepare("SELECT id_cliente FROM cliente WHERE nombre = ? AND telefono = ? AND id_cliente != ?");
+        $stmt_dup = $conn->prepare("SELECT id_cliente FROM cliente WHERE nombre = ? AND telefono = ? AND id_cliente != ? AND activo = 1");
         $stmt_dup->bind_param("ssi", $nombre, $telefono, $id);
         $stmt_dup->execute();
         $res_dup = $stmt_dup->get_result();
@@ -72,11 +72,21 @@ if (isset($_GET['eliminar'])) {
             $stmt->bind_param("i", $id);
             $stmt->execute();
             $stmt->close();
-            $mensaje = "Cliente eliminado correctamente";
+            $mensaje = "Cliente eliminado permanentemente (no tenía citas ni ventas asociadas)";
             $tipo_mensaje = "success";
-        } catch (Exception $e) {
-            $mensaje = "Error al eliminar cliente: " . $e->getMessage();
-            $tipo_mensaje = "error";
+        } catch (mysqli_sql_exception $e) {
+            if ($e->getCode() == 1451) {
+                // Borrado Lógico (Soft Delete)
+                $stmt_soft = $conn->prepare("UPDATE cliente SET activo = 0 WHERE id_cliente = ?");
+                $stmt_soft->bind_param("i", $id);
+                $stmt_soft->execute();
+                $stmt_soft->close();
+                $mensaje = "Cliente archivado (oculto). No se borró permanentemente para proteger el historial de sus citas o ventas previas.";
+                $tipo_mensaje = "success";
+            } else {
+                $mensaje = "Error al eliminar cliente: " . $e->getMessage();
+                $tipo_mensaje = "error";
+            }
         }
     } else {
         $mensaje = "No tienes permisos para eliminar clientes. Solo los administradores pueden realizar esta acción.";
@@ -103,13 +113,13 @@ if (isset($_GET['editar'])) {
 // CONSULTAR CLIENTES CON PAGINACIÓN Y BÚSQUEDA
 try {
     $search = isset($_GET['q']) ? trim($_GET['q']) : '';
-    $where_sql = "";
+    $where_sql = " WHERE c.activo = 1";
     if ($search !== '') {
-        $where_sql = " WHERE c.nombre LIKE '%" . $conn->real_escape_string($search) . "%' OR c.telefono LIKE '%" . $conn->real_escape_string($search) . "%'";
+        $where_sql .= " AND (c.nombre LIKE '%" . $conn->real_escape_string($search) . "%' OR c.telefono LIKE '%" . $conn->real_escape_string($search) . "%')";
     }
 
     // Obtener los IDs de los últimos 3 clientes para la lógica de "NUEVO"
-    $res_top = $conn->query("SELECT id_cliente FROM cliente ORDER BY id_cliente DESC LIMIT 3");
+    $res_top = $conn->query("SELECT id_cliente FROM cliente WHERE activo = 1 ORDER BY id_cliente DESC LIMIT 3");
     $top_ids = [];
     while($r = $res_top->fetch_assoc()) $top_ids[] = $r['id_cliente'];
     $top_ids_str = !empty($top_ids) ? implode(',', $top_ids) : '0';
@@ -143,7 +153,7 @@ try {
         SELECT u.id_usuario, u.nombre_usuario 
         FROM usuario u
         WHERE u.id_rol = 3 
-        AND u.id_usuario NOT IN (SELECT id_usuario FROM cliente WHERE id_usuario IS NOT NULL)
+        AND u.id_usuario NOT IN (SELECT id_usuario FROM cliente WHERE id_usuario IS NOT NULL AND activo = 1)
         ORDER BY u.nombre_usuario
     ");
 } catch (mysqli_sql_exception $e) {
@@ -515,15 +525,15 @@ try {
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 2px solid #667eea;">
             <h3 style="border:none; margin:0; padding:0;">Lista de Clientes</h3>
             
-            <form id="searchForm" style="display: flex; gap: 8px;">
+            <form id="searchForm" action="#tabla-clientes" style="display: flex; gap: 8px;">
                 <input 
                     type="text" 
                     id="searchInput"
                     name="q" 
-                    placeholder="Buscar cliente..." 
+                    placeholder="🔍 Buscar por nombre o teléfono..." 
                     value="<?php echo htmlspecialchars($search); ?>"
                     autocomplete="off"
-                    style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 200px;"
+                    style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; width: 230px;"
                 >
                 <button type="submit" class="btn btn-primary" style="padding: 8px 15px; font-size: 13px;">🔍</button>
             </form>
@@ -563,7 +573,7 @@ try {
                             <a href="?editar=<?php echo $row['id_cliente']; ?>">✏️ Editar</a>
                             <a href="?eliminar=<?php echo $row['id_cliente']; ?>" 
                                class="delete"
-                               onclick="event.preventDefault(); confirmacion('¿Estás seguro de eliminar este cliente?\nTambién se eliminarán todas sus citas.', '🗑️ Eliminar', () => window.location.href='?eliminar=<?php echo $row['id_cliente']; ?>')">
+                               onclick="event.preventDefault(); confirmacion('¿Estás seguro de eliminar este cliente?', '🗑️ Eliminar', () => window.location.href='?eliminar=<?php echo $row['id_cliente']; ?>')">
                                🗑️ Eliminar
                             </a>
                         </div>
@@ -589,33 +599,28 @@ try {
 
 <?php include 'inc/ui.php'; ?>
 <script>
-    // Búsqueda automática con debounce (500ms)
-    let searchTimeout;
     const searchInput = document.getElementById('searchInput');
-    const searchForm = document.getElementById('searchForm');
+    const searchForm  = document.getElementById('searchForm');
+
+    function normalizeText(text) {
+        return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+    }
 
     if (searchInput && searchForm) {
+        // Filtrado local en tiempo real — sin recargar la página
         searchInput.addEventListener('input', function() {
-            clearTimeout(searchTimeout);
-            
-            // Filtrado inmediato
-            const term = this.value.toLowerCase().trim();
+            const term = normalizeText(this.value);
             const rows = document.querySelectorAll('table tbody tr');
             rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
+                const text = normalizeText(row.textContent);
                 row.style.display = text.includes(term) ? '' : 'none';
             });
-
-            // Búsqueda global en el servidor
-            searchTimeout = setTimeout(() => {
-                const currentQ = "<?php echo addslashes($search); ?>";
-                if (this.value.trim() !== currentQ) {
-                    searchForm.submit();
-                }
-            }, 600);
         });
 
-        // Mantener el foco
+        // El servidor solo se consulta al presionar Enter o al hacer clic en el botón buscar
+        // (comportamiento nativo del <form>)
+
+        // Mantener el foco al recargar tras búsqueda explícita
         window.addEventListener('load', () => {
             if (searchInput.value !== "") {
                 searchInput.focus();

@@ -112,7 +112,7 @@ $configuracion_open = in_array($current_page, ['usuarios.php', 'perfil.php']);
         </div>
         <?php endif; ?>
 
-        <?php if (esAdmin()): ?>
+        <?php if (esAdmin() || esBarbero()): ?>
         <a href="reportes.php" class="nav-item <?php echo is_active('reportes.php'); ?>">
             <span class="icon">📊</span>
             <span class="nav-text">Reportes</span>

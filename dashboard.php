@@ -6,9 +6,9 @@ require_once("conexion.php");
 // Obtener estadísticas básicas
 try {
     $total_usuarios = $conn->query("SELECT COUNT(*) as total FROM usuario")->fetch_assoc()['total'];
-    $total_clientes = $conn->query("SELECT COUNT(*) as total FROM cliente")->fetch_assoc()['total'];
-    $total_servicios = $conn->query("SELECT COUNT(*) as total FROM servicio")->fetch_assoc()['total'];
-    $total_productos = $conn->query("SELECT COUNT(*) as total FROM producto")->fetch_assoc()['total'];
+    $total_clientes = $conn->query("SELECT COUNT(*) as total FROM cliente WHERE activo = 1")->fetch_assoc()['total'];
+    $total_servicios = $conn->query("SELECT COUNT(*) as total FROM servicio WHERE activo = 1")->fetch_assoc()['total'];
+    $total_productos = $conn->query("SELECT COUNT(*) as total FROM producto WHERE activo = 1")->fetch_assoc()['total'];
     $citas_pendientes = $conn->query("SELECT COUNT(*) as total FROM cita WHERE estado = 'Pendiente'")->fetch_assoc()['total'];
 } catch (Exception $e) {
     $total_usuarios = 0;
@@ -98,7 +98,7 @@ try {
             color: white;
         }
 
-        /* Bento Grid Layout - SIMETRÍA PERFECTA 6 COLUMNAS */
+        /* Bento Grid Layout */
         .bento-grid {
             display: grid;
             grid-template-columns: repeat(6, 1fr);
@@ -130,7 +130,6 @@ try {
             border-color: rgba(102, 126, 234, 0.3);
         }
 
-        /* Welcome Card (Spans across all 6) */
         .card-welcome {
             grid-column: span 6;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -151,7 +150,6 @@ try {
             font-size: 15px;
         }
 
-        /* Stat Cards */
         .card-stat {
             grid-column: span 1;
             align-items: center;
@@ -181,7 +179,6 @@ try {
             letter-spacing: 0.5px;
         }
 
-        /* Menu Cards */
         .card-menu {
             grid-column: span 3;
             flex-direction: row;
@@ -223,7 +220,6 @@ try {
             line-height: 1.4;
         }
 
-        /* Specific Menu Card Colors slightly tinted on hover */
         .card-citas:hover .menu-icon { background: #e3f2fd; color: #1565c0; }
         .card-clientes:hover .menu-icon { background: #f3e5f5; color: #6a1b9a; }
         .card-servicios:hover .menu-icon { background: #fff3e0; color: #e65100; }
@@ -259,185 +255,189 @@ try {
 <div class="dashboard-layout">
     <?php require_once("inc/sidebar.php"); ?>
 
-    <!-- Main Content wrapper -->
     <div class="main-content">
         <div class="header">
-    <div class="header-content">
-        <h1>✂️ Sistema Barbería</h1>
-        <div class="user-info">
-            <div class="user-badge">
-                👤 <?php echo htmlspecialchars(getNombreUsuario()); ?> 
-                (<?php echo htmlspecialchars(getRolUsuario()); ?>)
+            <div class="header-content">
+                <h1>✂️ Sistema Barbería</h1>
+                <div class="user-info">
+                    <div class="user-badge">
+                        👤 <?php echo htmlspecialchars(getNombreUsuario()); ?> 
+                        (<?php echo htmlspecialchars(getRolUsuario()); ?>)
+                    </div>
+                    <a href="logout.php" class="btn-logout">Cerrar Sesión</a>
+                </div>
             </div>
-            <a href="logout.php" class="btn-logout">Cerrar Sesión</a>
         </div>
-    </div>
-</div>
 
-<div class="bento-grid">
-    <!-- Bienvenida -->
-    <div class="bento-card card-welcome">
-        <h2>¡Bienvenido/a, <?php echo htmlspecialchars(getNombreUsuario()); ?>!</h2>
-        <p>Selecciona una opción del menú para comenzar tu día de manera eficiente.</p>
-    </div>
+        <div class="bento-grid">
+            <!-- Bienvenida -->
+            <div class="bento-card card-welcome">
+                <h2>¡Bienvenido/a, <?php echo htmlspecialchars(getNombreUsuario()); ?>!</h2>
+                <p>Selecciona una opción del menú para comenzar tu día de manera eficiente.</p>
+            </div>
 
-    <?php
-    // Alerta de Stock Bajo
-    $stock_bajo = [];
-    if (esAdmin() || esBarbero()) {
-        try {
-            // Utilizamos la nueva vista de stock_bajo
-            $rsb = $conn->query("SELECT nombre, stock FROM v_stock_bajo LIMIT 5");
-            if ($rsb) {
-                while($s = $rsb->fetch_assoc()) {
-                    $stock_bajo[] = $s;
-                }
+            <?php
+            // ✅ CORRECCIÓN: se filtra por activo = 1 para ignorar productos eliminados
+            $stock_bajo = [];
+            if (esAdmin() || esBarbero()) {
+                try {
+                    $rsb = $conn->query("
+                        SELECT nombre, stock 
+                        FROM producto 
+                        WHERE stock <= 5 
+                          AND activo = 1 
+                        ORDER BY stock ASC 
+                        LIMIT 5
+                    ");
+                    if ($rsb) {
+                        while ($s = $rsb->fetch_assoc()) {
+                            $stock_bajo[] = $s;
+                        }
+                    }
+                } catch (Exception $e) {}
             }
-        } catch(Exception $e){}
-    }
-    ?>
-    <?php if(!empty($stock_bajo)): ?>
-    <div class="bento-card card-welcome" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);">
-        <h2>⚠️ Alerta de Inventario</h2>
-        <p>Los siguientes productos tienen muy poco stock y necesitan reposición:</p>
-        <ul style="margin-top:10px; margin-left: 20px; font-weight:600; color: #fff;">
-            <?php foreach($stock_bajo as $psb): ?>
-                <li><?php echo htmlspecialchars($psb['nombre']); ?> (Quedan: <?php echo $psb['stock']; ?>)</li>
-            <?php endforeach; ?>
-        </ul>
+            ?>
+
+            <?php if (!empty($stock_bajo)): ?>
+            <div class="bento-card card-welcome" style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);">
+                <h2>⚠️ Alerta de Inventario (<?php echo count($stock_bajo); ?> productos)</h2>
+                <p>Los siguientes productos tienen muy poco stock y necesitan reposición:</p>
+                <ul style="margin-top:10px; margin-left: 20px; font-weight:600; color: #fff;">
+                    <?php foreach ($stock_bajo as $psb): ?>
+                        <li><?php echo htmlspecialchars($psb['nombre']); ?> (Quedan: <?php echo $psb['stock']; ?>)</li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+            <?php endif; ?>
+
+            <!-- Estadísticas (solo para admin y barbero) -->
+            <?php if (esAdmin() || esBarbero()): ?>
+                <div class="bento-card card-stat">
+                    <div class="stat-icon">👥</div>
+                    <div class="stat-info">
+                        <div class="stat-number"><?php echo $total_usuarios; ?></div>
+                        <div class="stat-label">Usuarios</div>
+                    </div>
+                </div>
+                
+                <div class="bento-card card-stat">
+                    <div class="stat-icon">🧑‍🦱</div>
+                    <div class="stat-info">
+                        <div class="stat-number"><?php echo $total_clientes; ?></div>
+                        <div class="stat-label">Clientes</div>
+                    </div>
+                </div>
+                
+                <div class="bento-card card-stat">
+                    <div class="stat-icon">✂️</div>
+                    <div class="stat-info">
+                        <div class="stat-number"><?php echo $total_servicios; ?></div>
+                        <div class="stat-label">Servicios</div>
+                    </div>
+                </div>
+                
+                <div class="bento-card card-stat">
+                    <div class="stat-icon">🛍️</div>
+                    <div class="stat-info">
+                        <div class="stat-number"><?php echo $total_productos; ?></div>
+                        <div class="stat-label">Productos</div>
+                    </div>
+                </div>
+                
+                <div class="bento-card card-stat">
+                    <div class="stat-icon">📅</div>
+                    <div class="stat-info">
+                        <div class="stat-number"><?php echo $citas_pendientes; ?></div>
+                        <div class="stat-label">Citas Pdtes.</div>
+                    </div>
+                </div>
+
+                <div class="bento-card card-stat">
+                    <div class="stat-icon">🛒</div>
+                    <div class="stat-info">
+                        <div class="stat-number"><?php
+                            $tv = $conn->query("SELECT COUNT(*) t FROM venta WHERE MONTH(fecha_venta)=MONTH(NOW()) AND YEAR(fecha_venta)=YEAR(NOW())");
+                            echo $tv ? $tv->fetch_assoc()['t'] : 0;
+                        ?></div>
+                        <div class="stat-label">Ventas Mes</div>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- Menú de Opciones -->
+            <a href="citas.php" class="bento-card card-menu card-citas">
+                <div class="menu-icon">📅</div>
+                <div>
+                    <h3>Citas</h3>
+                    <p>Ver, agendar y gestionar el calendario de clientes de la barbería.</p>
+                </div>
+            </a>
+
+            <?php if (esAdmin() || esBarbero()): ?>
+            <a href="clientes.php" class="bento-card card-menu card-clientes">
+                <div class="menu-icon">🧑‍🦱</div>
+                <div>
+                    <h3>Clientes</h3>
+                    <p>Gestionar y mantener el registro de clientes habituales y nuevos.</p>
+                </div>
+            </a>
+            
+            <a href="servicios.php" class="bento-card card-menu card-servicios">
+                <div class="menu-icon">✂️</div>
+                <div>
+                    <h3>Servicios</h3>
+                    <p>Administrar el catálogo de cortes, arreglos y sus respectivos precios.</p>
+                </div>
+            </a>
+            
+            <a href="productos.php" class="bento-card card-menu card-productos">
+                <div class="menu-icon">🛍️</div>
+                <div>
+                    <h3>Productos</h3>
+                    <p>Control de inventario, stock y registro de productos en tienda.</p>
+                </div>
+            </a>
+
+            <a href="ventas.php" class="bento-card card-menu card-ventas">
+                <div class="menu-icon">🛒</div>
+                <div>
+                    <h3>Ventas</h3>
+                    <p>Registrar ventas rápidas directas y llevar el control de caja.</p>
+                </div>
+            </a>
+            <?php endif; ?>
+
+            <?php if (esAdmin()): ?>
+            <a href="usuarios.php" class="bento-card card-menu card-usuarios">
+                <div class="menu-icon">👤</div>
+                <div>
+                    <h3>Usuarios</h3>
+                    <p>Gestión de cuentas, barberos y administradores del sistema.</p>
+                </div>
+            </a>
+            <?php endif; ?>
+
+            <?php if (esAdmin() || esBarbero()): ?>
+            <a href="reportes.php" class="bento-card card-menu card-reportes">
+                <div class="menu-icon">📊</div>
+                <div>
+                    <h3>Reportes</h3>
+                    <p>Monitoreo inteligente, analíticas de negocio y rendimiento mensual.</p>
+                </div>
+            </a>
+            <?php endif; ?>
+
+            <a href="perfil.php" class="bento-card card-menu card-perfil">
+                <div class="menu-icon">⚙️</div>
+                <div>
+                    <h3>Mi Perfil</h3>
+                    <p>Configuración personal de cuenta, cambio de contraseñas y datos.</p>
+                </div>
+            </a>
+        </div>
+
     </div>
-    <?php endif; ?>
-    
-    <!-- Estadísticas (solo para admin y barbero) -->
-    <?php if (esAdmin() || esBarbero()): ?>
-        <div class="bento-card card-stat">
-            <div class="stat-icon">👥</div>
-            <div class="stat-info">
-                <div class="stat-number"><?php echo $total_usuarios; ?></div>
-                <div class="stat-label">Usuarios</div>
-            </div>
-        </div>
-        
-        <div class="bento-card card-stat">
-            <div class="stat-icon">🧑‍🦱</div>
-            <div class="stat-info">
-                <div class="stat-number"><?php echo $total_clientes; ?></div>
-                <div class="stat-label">Clientes</div>
-            </div>
-        </div>
-        
-        <div class="bento-card card-stat">
-            <div class="stat-icon">✂️</div>
-            <div class="stat-info">
-                <div class="stat-number"><?php echo $total_servicios; ?></div>
-                <div class="stat-label">Servicios</div>
-            </div>
-        </div>
-        
-        <div class="bento-card card-stat">
-            <div class="stat-icon">🛍️</div>
-            <div class="stat-info">
-                <div class="stat-number"><?php echo $total_productos; ?></div>
-                <div class="stat-label">Productos</div>
-            </div>
-        </div>
-        
-        <div class="bento-card card-stat">
-            <div class="stat-icon">📅</div>
-            <div class="stat-info">
-                <div class="stat-number"><?php echo $citas_pendientes; ?></div>
-                <div class="stat-label">Citas Pdtes.</div>
-            </div>
-        </div>
-
-        <div class="bento-card card-stat">
-            <div class="stat-icon">🛒</div>
-            <div class="stat-info">
-                <div class="stat-number"><?php
-                    $tv = $conn->query("SELECT COUNT(*) t FROM venta WHERE MONTH(fecha_venta)=MONTH(NOW()) AND YEAR(fecha_venta)=YEAR(NOW())");
-                    echo $tv ? $tv->fetch_assoc()['t'] : 0;
-                ?></div>
-                <div class="stat-label">Ventas Mes</div>
-            </div>
-        </div>
-    <?php endif; ?>
-    
-    <!-- Menú de Opciones -->
-    
-    <!-- Opción para TODOS -->
-    <a href="citas.php" class="bento-card card-menu card-citas">
-        <div class="menu-icon">📅</div>
-        <div>
-            <h3>Citas</h3>
-            <p>Ver, agendar y gestionar el calendario de clientes de la barbería.</p>
-        </div>
-    </a>
-    
-    <!-- Solo Admin y Barbero -->
-    <?php if (esAdmin() || esBarbero()): ?>
-    <a href="clientes.php" class="bento-card card-menu card-clientes">
-        <div class="menu-icon">🧑‍🦱</div>
-        <div>
-            <h3>Clientes</h3>
-            <p>Gestionar y mantener el registro de clientes habituales y nuevos.</p>
-        </div>
-    </a>
-    
-    <a href="servicios.php" class="bento-card card-menu card-servicios">
-        <div class="menu-icon">✂️</div>
-        <div>
-            <h3>Servicios</h3>
-            <p>Administrar el catálogo de cortes, arreglos y sus respectivos precios.</p>
-        </div>
-    </a>
-    
-    <a href="productos.php" class="bento-card card-menu card-productos">
-        <div class="menu-icon">🛍️</div>
-        <div>
-            <h3>Productos</h3>
-            <p>Control de inventario, stock y registro de productos en tienda.</p>
-        </div>
-    </a>
-    <a href="ventas.php" class="bento-card card-menu card-ventas">
-        <div class="menu-icon">🛒</div>
-        <div>
-            <h3>Ventas</h3>
-            <p>Registrar ventas rápidas directas y llevar el control de caja.</p>
-        </div>
-    </a>
-    <?php endif; ?>
-    
-    <!-- Solo Admin -->
-    <?php if (esAdmin()): ?>
-    <a href="usuarios.php" class="bento-card card-menu card-usuarios">
-        <div class="menu-icon">👤</div>
-        <div>
-            <h3>Usuarios</h3>
-            <p>Gestión de cuentas, barberos y administradores del sistema.</p>
-        </div>
-    </a>
-    
-    <a href="reportes.php" class="bento-card card-menu card-reportes">
-        <div class="menu-icon">📊</div>
-        <div>
-            <h3>Reportes</h3>
-            <p>Monitoreo inteligente, analíticas de negocio y rendimiento mensual.</p>
-        </div>
-    </a>
-    <?php endif; ?>
-    
-    <!-- Opción para TODOS -->
-    <a href="perfil.php" class="bento-card card-menu card-perfil">
-        <div class="menu-icon">⚙️</div>
-        <div>
-            <h3>Mi Perfil</h3>
-            <p>Configuración personal de cuenta, cambio de contraseñas y datos.</p>
-        </div>
-    </a>
 </div>
-
-    </div> <!-- End main-content -->
-</div> <!-- End dashboard-layout -->
 
 </body>
 </html>

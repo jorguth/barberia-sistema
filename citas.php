@@ -73,9 +73,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['guardar_cita'])) {
             }
         }
 
+        // VALIDACIÓN DE CAMPOS REQUERIDOS
         // VALIDACIÓN DE CLIENTE
         if ($id_cliente <= 0) {
             throw new Exception("Debes seleccionar un cliente válido.");
+        }
+        if (empty($fecha)) {
+            throw new Exception("Debes seleccionar una fecha para la cita.");
+        }
+        if (empty($hora)) {
+            throw new Exception("Debes seleccionar una hora para la cita.");
+        }
+        if (empty($servicios)) {
+            throw new Exception("Debes seleccionar al menos un servicio.");
         }
 
         // VALIDACIÓN DE HORARIO
@@ -319,8 +329,9 @@ try {
 // OBTENER CLIENTES Y SERVICIOS PARA EL FORMULARIO
 // -------------------------------------------------------
 try {
-    $clientes_list = $conn->query("SELECT id_cliente, nombre FROM cliente ORDER BY nombre");
-    $servicios_list = $conn->query("SELECT id_servicio, nombre, precio, duracion_minutos FROM servicio ORDER BY nombre");
+    $clientes_list = $conn->query("SELECT id_cliente, nombre, telefono FROM cliente WHERE activo = 1 ORDER BY nombre");
+    $clientes_list = $conn->query("SELECT id_cliente, nombre FROM cliente WHERE activo = 1 ORDER BY nombre");
+    $servicios_list = $conn->query("SELECT id_servicio, nombre, precio, duracion_minutos FROM servicio WHERE activo = 1 ORDER BY nombre");
 } catch (Exception $e) {
     $clientes_list = false;
     $servicios_list = false;
@@ -1175,6 +1186,7 @@ for ($h = 8; $h <= 20; $h++) {
             <h3 id="modalNuevaTitle">➕ Nueva Cita</h3>
             <button class="modal-close" onclick="cerrarModal('modalNueva')">&times;</button>
         </div>
+        <form method="POST" id="formNuevaCita">
         <form method="POST">
             <input type="hidden" name="id_cita" id="id_cita_nueva" value="0">
             <input type="hidden" name="semana" value="<?php echo $semana_offset; ?>">
@@ -1186,6 +1198,7 @@ for ($h = 8; $h <= 20; $h++) {
                         <select name="id_cliente" id="id_cliente" required>
                             <option value="">-- Selecciona cliente --</option>
                             <?php if ($clientes_list && $clientes_list->num_rows > 0): ?>
+                                <?php $clientes_list->data_seek(0); ?>
                                 <?php while ($cl = $clientes_list->fetch_assoc()): ?>
                                 <option value="<?php echo $cl['id_cliente']; ?>">
                                     <?php echo htmlspecialchars($cl['nombre']); ?>
@@ -1217,6 +1230,7 @@ for ($h = 8; $h <= 20; $h++) {
                     <div class="form-group">
                         <label for="hora_nueva">Hora <span class="required">*</span></label>
                         <select name="hora" id="hora_nueva" required>
+                            <option value="">-- Selecciona hora --</option>
                             <?php foreach ($horas_atencion as $h): ?>
                             <option value="<?php echo $h; ?>"><?php echo $h; ?></option>
                             <?php endforeach; ?>
@@ -1226,6 +1240,7 @@ for ($h = 8; $h <= 20; $h++) {
 
                 <div class="form-group" style="margin-bottom: 16px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label style="margin-bottom: 0;">Servicios <span class="required">*</span></label>
                         <label style="margin-bottom: 0;">Servicios</label>
                         <input 
                             type="text" 
@@ -1300,12 +1315,23 @@ for ($h = 8; $h <= 20; $h++) {
 <script>
 const CITAS_DATA = <?php
 $citas_js = [];
+$citas_ids = array_column($todas_citas, 'id_cita');
+$citas_obs = [];
+
+if (!empty($citas_ids)) {
+    $ids_str = implode(',', array_map('intval', $citas_ids));
+    $obs_res = $conn->query("SELECT id_cita, observaciones FROM cita_servicio WHERE id_cita IN ($ids_str)");
+    if ($obs_res) {
+        while ($o_row = $obs_res->fetch_assoc()) {
+            if (!empty($o_row['observaciones'])) {
+                $citas_obs[$o_row['id_cita']] = $o_row['observaciones'];
+            }
+        }
+    }
+}
+
 foreach ($todas_citas as $cita) {
-    // Obtener observaciones (vienen en la primera fila de cita_servicio usualmente)
-    // En nuestro query, observaciones no está en el GROUP BY pero podemos obtenerlo
-    // Para simplificar, asumiremos que todas las observaciones de una cita son iguales
-    $obs_query = $conn->query("SELECT observaciones FROM cita_servicio WHERE id_cita = " . $cita['id_cita'] . " LIMIT 1");
-    $obs = $obs_query ? $obs_query->fetch_assoc()['observaciones'] : '';
+    $obs = $citas_obs[$cita['id_cita']] ?? '';
 
     $citas_js[$cita['id_cita']] = [
         'id_cita'        => $cita['id_cita'],
@@ -1507,6 +1533,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const searchSrv = document.getElementById('searchSrvModal');
     if (searchSrv) {
         searchSrv.addEventListener('input', initSrvPagination);
+    }
+    
+    const formCita = document.getElementById('formNuevaCita');
+    if (formCita) {
+        formCita.addEventListener('submit', function(e) {
+            const serviciosSeleccionados = document.querySelectorAll('input[name="servicios[]"]:checked');
+            if (serviciosSeleccionados.length === 0) {
+                e.preventDefault();
+                if (typeof showToast === 'function') {
+                    showToast('⚠️ Debes seleccionar al menos un servicio para agendar la cita.', 'warning');
+                } else {
+                    alert('Debes seleccionar al menos un servicio para agendar la cita.');
+                }
+                return false;
+            }
+        });
     }
 });
 

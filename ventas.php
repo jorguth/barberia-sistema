@@ -237,13 +237,25 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['restaurar_venta'])) {
 /* ============================================================
    DATOS PARA EL FORMULARIO
    ============================================================ */
-$clientes  = $conn->query("SELECT id_cliente, nombre FROM cliente ORDER BY nombre");
+$clientes  = $conn->query("SELECT id_cliente, nombre FROM cliente WHERE activo = 1 ORDER BY nombre");
 
-// PRODUCTOS DISPONIBLES con PAGINACIÓN
-$pagDataProd = getPaginationData($conn, "SELECT COUNT(*) as total FROM producto WHERE stock > 0", 12, 'p_prod');
+// PRODUCTOS DISPONIBLES con FILTRO Y PAGINACIÓN
+$search_prod = !empty($_GET['q_prod']) ? trim($_GET['q_prod']) : '';
+$where_prod = " WHERE stock > 0 AND activo = 1";
+if ($search_prod !== '') {
+    $where_prod .= " AND nombre LIKE '%" . $conn->real_escape_string($search_prod) . "%'";
+}
+
+$order_prod = "nombre ASC";
+if ($search_prod !== '') {
+    $safe_search = $conn->real_escape_string($search_prod);
+    $order_prod = "CASE WHEN nombre LIKE '$safe_search%' THEN 1 ELSE 2 END ASC, nombre ASC";
+}
+
+$pagDataProd = getPaginationData($conn, "SELECT COUNT(*) as total FROM producto $where_prod", 12, 'p_prod');
 $limitProd = 12;
 $offsetProd = $pagDataProd['offset'];
-$productos_disp = $conn->query("SELECT id_producto, nombre, precio, stock FROM producto WHERE stock > 0 ORDER BY nombre LIMIT $limitProd OFFSET $offsetProd");
+$productos_disp = $conn->query("SELECT id_producto, nombre, precio, stock FROM producto $where_prod ORDER BY $order_prod LIMIT $limitProd OFFSET $offsetProd");
 
 // HISTORIAL – con filtro de fecha y PAGINACIÓN
 $filtro_desde = !empty($_GET['desde']) ? $_GET['desde'] : date('Y-m-01');
@@ -365,6 +377,7 @@ $total_periodo = $conn->query("
             border-radius: 16px;
             box-shadow: 0 4px 24px rgba(0,0,0,0.07);
             overflow: hidden;
+            scroll-margin-top: 80px; /* Evita que el navbar superponga el título morado */
         }
         .card-header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -753,7 +766,24 @@ $total_periodo = $conn->query("
         <!-- ===== RESUMEN y mini-info ===== -->
         <div style="display:flex;flex-direction:column;gap:16px;">
             <div class="card" id="card-productos">
-                <div class="card-header">📋 Productos Disponibles</div>
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 24px;">
+                    <span>📋 Productos Disponibles</span>
+                    <form id="searchProdForm" method="GET" action="#card-productos" style="display: flex; gap: 6px; margin: 0; align-items: center;">
+                        <input type="hidden" name="desde" value="<?= $filtro_desde ?>">
+                        <input type="hidden" name="hasta" value="<?= $filtro_hasta ?>">
+                        <input type="hidden" name="p" value="<?= ($pagData['current_page'] ?? 1) ?>">
+                        <input type="hidden" name="scroll_to" value="productos">
+                        <input 
+                            type="text" 
+                            id="searchProdInput"
+                            name="q_prod" 
+                            placeholder="🔍 Buscar..." 
+                            value="<?= htmlspecialchars($search_prod) ?>"
+                            autocomplete="off"
+                            style="padding: 6px 12px; border: 1px solid rgba(255,255,255,0.3); border-radius: 6px; font-size: 12px; width: 140px; background: rgba(255,255,255,0.15); color: white; outline: none; transition: all 0.3s;"
+                        >
+                    </form>
+                </div>
                 <div class="card-body" style="padding:0;">
                     <table class="hist">
                         <thead>
@@ -782,7 +812,7 @@ $total_periodo = $conn->query("
                     </table>
                     
                     <div style="padding: 10px;">
-                        <?php echo renderPagination($pagDataProd['current_page'], $pagDataProd['total_pages'], "?desde=$filtro_desde&hasta=$filtro_hasta&p=" . ($pagData['current_page'] ?? 1), 'p_prod', '#card-productos'); ?>
+                        <?php echo renderPagination($pagDataProd['current_page'], $pagDataProd['total_pages'], "?desde=$filtro_desde&hasta=$filtro_hasta&p=" . ($pagData['current_page'] ?? 1) . "&q_prod=" . urlencode($search_prod), 'p_prod', '#card-productos'); ?>
                     </div>
                 </div>
             </div>
@@ -804,6 +834,7 @@ $total_periodo = $conn->query("
                 <label>Hasta</label>
                 <input type="date" name="hasta" value="<?= $filtro_hasta ?>">
             </div>
+            <input type="hidden" name="scroll_to" value="historial">
             <button type="submit" class="btn btn-filter">🔍 Filtrar</button>
         </form>
 
@@ -849,7 +880,7 @@ $total_periodo = $conn->query("
             </tbody>
         </table>
         
-        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], "?desde=$filtro_desde&hasta=$filtro_hasta&p_prod=" . ($pagDataProd['current_page'] ?? 1), 'p', '#historial-ventas'); ?>
+        <?php echo renderPagination($pagData['current_page'], $pagData['total_pages'], "?desde=$filtro_desde&hasta=$filtro_hasta&q_prod=" . urlencode($search_prod) . "&p_prod=" . ($pagDataProd['current_page'] ?? 1), 'p', '#historial-ventas'); ?>
         
         <?php else: ?>
         <div class="empty-state">
@@ -879,20 +910,28 @@ $total_periodo = $conn->query("
 $ventas_js = [];
 try {
     $rv = $conn->query("SELECT * FROM v_historial_ventas ORDER BY fecha_venta DESC LIMIT 200");
+    $sales_ids = [];
     while ($row = $rv->fetch_assoc()) {
-        $id = $row['id_venta'];
-        $detalles = [];
-        $rd = $conn->query("SELECT vd.*, p.nombre FROM venta_detalle vd JOIN producto p ON vd.id_producto = p.id_producto WHERE vd.id_venta = $id");
-        while ($det = $rd->fetch_assoc()) $detalles[] = $det;
-        $row['detalles'] = $detalles;
-        $ventas_js[$id] = $row;
+        $row['detalles'] = [];
+        $ventas_js[$row['id_venta']] = $row;
+        $sales_ids[] = $row['id_venta'];
+    }
+    
+    if (!empty($sales_ids)) {
+        $ids_str = implode(',', $sales_ids);
+        $rd = $conn->query("SELECT vd.*, p.nombre FROM venta_detalle vd JOIN producto p ON vd.id_producto = p.id_producto WHERE vd.id_venta IN ($ids_str)");
+        if ($rd) {
+            while ($det = $rd->fetch_assoc()) {
+                $ventas_js[$det['id_venta']]['detalles'][] = $det;
+            }
+        }
     }
 } catch(Exception $e) {}
 
 // Datos de productos para el formulario
 $prods_js = [];
 try {
-    $rp = $conn->query("SELECT id_producto, nombre, precio, stock FROM producto ORDER BY nombre");
+    $rp = $conn->query("SELECT id_producto, nombre, precio, stock FROM producto WHERE activo = 1 ORDER BY nombre");
     while ($pr = $rp->fetch_assoc()) $prods_js[] = $pr;
 } catch(Exception $e) {}
 ?>
@@ -1109,6 +1148,54 @@ function cerrarModal() {
     document.getElementById('modalDetalle').classList.remove('active');
 }
 document.getElementById('modalDetalle').addEventListener('click', e => { if (e.target === document.getElementById('modalDetalle')) cerrarModal(); });
+
+// Búsqueda en tiempo real para Productos Disponibles
+let searchProdTimeout;
+const searchProdInput = document.getElementById('searchProdInput');
+const searchProdForm = document.getElementById('searchProdForm');
+
+if (searchProdInput && searchProdForm) {
+    searchProdInput.addEventListener('input', function() {
+        clearTimeout(searchProdTimeout);
+        
+        // Mostrar un pequeño indicador visual de "buscando" en el input
+        this.style.opacity = '0.7';
+
+        // Búsqueda exclusiva en el servidor (para que funcione correctamente con la paginación)
+        searchProdTimeout = setTimeout(() => {
+            const currentQ = "<?php echo addslashes($search_prod); ?>";
+            if (searchProdInput.value.trim() !== currentQ) {
+                searchProdForm.submit();
+            } else {
+                searchProdInput.style.opacity = '1';
+            }
+        }, 600);
+    });
+
+    // Mantener el foco al recargar
+    window.addEventListener('load', () => {
+        if (searchProdInput.value !== "") {
+            searchProdInput.focus();
+            const val = searchProdInput.value;
+            searchProdInput.value = '';
+            searchProdInput.value = val;
+        }
+
+        // Auto-scroll basado en hash o parámetro explícito
+        const urlParams = new URLSearchParams(window.location.search);
+        const hash = window.location.hash;
+        
+        if (hash === '#card-productos' || urlParams.get('scroll_to') === 'productos') {
+            const prod = document.getElementById('card-productos');
+            if(prod) setTimeout(() => prod.scrollIntoView({behavior: 'instant', block: 'start'}), 10);
+        } else if (hash === '#historial-ventas' || urlParams.get('scroll_to') === 'historial') {
+            const hist = document.getElementById('historial-ventas');
+            if(hist) setTimeout(() => hist.scrollIntoView({behavior: 'instant', block: 'start'}), 10);
+        }
+    });
+}
+
+
 </script>
 
 </div> <!-- .container -->
